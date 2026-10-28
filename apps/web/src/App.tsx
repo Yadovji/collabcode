@@ -81,7 +81,9 @@ function Room() {
       setAccessError(error instanceof Error ? error.message : "Could not load workspace access.");
     }
   }, [roomId]);
-  useEffect(() => { void refreshAccess(); }, [refreshAccess]);
+  // A new room is created by the authenticated Socket.IO join. Wait for its
+  // initial document sync before asking the access endpoint for its members.
+  useEffect(() => { if (workspace.synced) void refreshAccess(); }, [workspace.synced, refreshAccess]);
   useEffect(() => {
     if (workspace.filePaths.length && !workspace.filePaths.includes(activeFile)) setActiveFile(workspace.filePaths[0]);
   }, [workspace.filePaths, activeFile]);
@@ -227,7 +229,7 @@ function Room() {
         </div>
         <div className="bottom-panel">
           <div className="panel-tabs"><button className="panel-tab active"><span className="terminal-glyph">&gt;_</span> OUTPUT</button><button className="panel-tab" onClick={() => setChatOpen(!chatOpen)}>COLLABORATION</button><span className="panel-status"><span className="status-green" /> WORKSPACE READY</span></div>
-          {chatOpen ? <div className="panel-content"><div className="panel-message"><Sparkles size={15} /><span>Live editing is on. Only invited accounts can open this room.</span></div><button className="panel-action" onClick={inviteMember}>Invite a teammate <ArrowRight size={13} /></button></div> : <div className="panel-content"><div className="terminal-line"><span className="terminal-prompt">›</span><span>{previewOpen ? "Website preview is isolated in a browser sandbox." : "CollabCode Phase 4 ready"}</span></div><div className="terminal-hint">{previewOpen ? "Edits sync live. Press Run preview again to refresh the page." : "Use Run preview for a shared HTML, CSS, and JavaScript website. Server-side code execution is not enabled."}</div></div>}
+          {chatOpen ? <div className="panel-content"><div className="panel-message"><Sparkles size={15} /><span>Live editing is on. Only invited accounts can open this room.</span></div>{canManageAccess ? <button className="panel-action" onClick={inviteMember}>Invite a teammate <ArrowRight size={13} /></button> : <div className="terminal-hint">Only the workspace owner can invite teammates.</div>}</div> : <div className="panel-content"><div className="terminal-line"><span className="terminal-prompt">›</span><span>{previewOpen ? "Website preview is isolated in a browser sandbox." : "CollabCode Phase 4 ready"}</span></div><div className="terminal-hint">{previewOpen ? "Edits sync live. Press Run preview again to refresh the page." : "Use Run preview for a shared HTML, CSS, and JavaScript website. Server-side code execution is not enabled."}</div></div>}
         </div>
       </main>
       <aside className="right-rail">
