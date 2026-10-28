@@ -1,0 +1,59 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Workspace {
+  id            String   @id @db.VarChar(80)
+  name          String   @default("Untitled workspace") @db.VarChar(120)
+  documentState Bytes
+  ownerId       String?  @db.VarChar(30)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  owner   User?             @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  members WorkspaceMember[]
+
+  @@index([ownerId])
+}
+
+model User {
+  id           String   @id @default(cuid()) @db.VarChar(30)
+  email        String   @unique @db.VarChar(254)
+  name         String   @db.VarChar(80)
+  passwordHash String   @db.VarChar(255)
+  createdAt    DateTime @default(now())
+
+  sessions          Session[]
+  ownedWorkspaces   Workspace[]       @relation("WorkspaceOwner")
+  workspaceMemberships WorkspaceMember[]
+}
+
+model Session {
+  id        String   @id @db.VarChar(64)
+  userId    String   @db.VarChar(30)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model WorkspaceMember {
+  workspaceId String   @db.VarChar(80)
+  userId      String   @db.VarChar(30)
+  role        String   @default("member") @db.VarChar(20)
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, userId])
+  @@index([userId])
+}

@@ -1,0 +1,35 @@
+{
+  "name": "collab-code-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Phase 4 collaborative browser IDE with accounts, workspace access control, PostgreSQL persistence, and sandboxed website previews.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "dev": "npm run build --workspace @collab/shared && concurrently -k -n API,WEB -c blue,green \"npm run dev --workspace @collab/api\" \"npm run dev --workspace @collab/web\"",
+    "build": "npm run build --workspace @collab/shared && npm run build --workspace @collab/api && npm run build --workspace @collab/web",
+    "start": "npm run start --workspace @collab/api",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose stop postgres",
+    "db:generate": "npm run db:generate --workspace @collab/api",
+    "db:migrate": "npm run db:migrate --workspace @collab/api",
+    "db:migrate:deploy": "npm run db:migrate:deploy --workspace @collab/api",
+    "db:status": "npm run db:status --workspace @collab/api",
+    "clean": "npm run clean --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  },
+  "allowScripts": {
+    "prisma@7.10.1": true,
+    "@prisma/engines@7.10.1": true,
+    "esbuild@0.28.2": true,
+    "esbuild@0.25.12": true
+  }
+}

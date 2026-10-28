@@ -1,0 +1,27 @@
+{
+  "name": "@collab/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "node scripts/copy-monaco.mjs && vite --host 0.0.0.0", "build": "node scripts/copy-monaco.mjs && tsc -b && vite build", "preview": "vite preview --host 0.0.0.0", "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"" },
+  "dependencies": {
+    "@collab/shared": "*",
+    "@monaco-editor/react": "^4.7.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "lucide-react": "^0.468.0",
+    "monaco-editor": "^0.52.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.1",
+    "socket.io-client": "^4.8.1",
+    "y-monaco": "^0.1.6",
+    "y-protocols": "^1.0.6",
+    "yjs": "^13.6.23"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7"
+  }
+}
