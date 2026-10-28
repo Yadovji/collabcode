@@ -93,25 +93,17 @@ Caddy obtains and renews the HTTPS certificate. Share `https://<your-domain>` wi
 
 ## Deploy to Render
 
-Deployment is prepared for a GitHub repository, a hosted PostgreSQL database, and two Render services. You do not need Docker to deploy this phase.
+Deployment is prepared for a GitHub repository, a hosted PostgreSQL database, and one Render Web Service. You do not need Docker to deploy this phase.
 
 1. Create a **private GitHub repository**, then from this project folder run `git init`, `git add .`, `git commit -m "Prepare CollabCode private demo"`, add your repository as `origin`, and push the `main` branch. Do not commit a real `.env` file.
 2. In Render, create a **Web Service** from the repository:
    - Root directory: repository root
-   - Build command: `npm install && npm run build --workspace @collab/shared && npm run build --workspace @collab/api`
+   - Build command: `npm install && npm run build --workspace @collab/shared && npm run build --workspace @collab/api && npm run build --workspace @collab/web`
    - Start command: `npm run db:migrate:deploy && npm run start --workspace @collab/api`
-   - Add `NODE_ENV=production`, `TRUST_PROXY=1`, `WEB_ORIGIN` with the frontend's public URL after creating the static site, and `DATABASE_URL` with your hosted PostgreSQL connection string.
+   - Add `NODE_ENV=production`, `TRUST_PROXY=1`, `WEB_ORIGIN` with this Web Service's own public URL, and `DATABASE_URL` with your hosted PostgreSQL connection string.
    - Render provides the `PORT` value automatically.
-3. Create a **Static Site** from the same repository:
-   - Root directory: repository root
-   - Build command: `npm install && npm run build --workspace @collab/shared && npm run build --workspace @collab/web`
-   - Publish directory: `apps/web/dist`
-   - Build environment variable: `VITE_API_URL` set to the API service URL, without a trailing slash.
-   - Add a rewrite rule `/*` → `/index.html` with status `200` so room links open directly.
-4. Copy the static site's public URL into the API service's `WEB_ORIGIN` environment variable, then redeploy the API.
-5. Open the static site, create a room, and test the same link in a second browser. Check the API's `/health` route and Render logs if the socket does not connect.
-
-The frontend embeds `VITE_API_URL` at build time, so changing it requires a new static-site build. Keep `WEB_ORIGIN` equal to the exact deployed frontend origin.
+3. Set `WEB_ORIGIN` to the Web Service's own public URL, then redeploy if you changed it.
+4. Open the Web Service URL, create a room, and test the same link in a second browser. The same URL also serves `/health` for an API status check. Do not use the separate Static Site URL for sign-in or rooms.
 
 ## Current scope and limitations
 

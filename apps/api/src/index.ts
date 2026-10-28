@@ -1,7 +1,11 @@
 import "./env.js";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
+import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Server, type Socket } from "socket.io";
 import * as Y from "yjs";
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate, removeAwarenessStates } from "y-protocols/awareness";
@@ -23,6 +27,19 @@ const trustProxy = process.env.TRUST_PROXY === "1";
 const app = Fastify({ logger: true, bodyLimit: 1024 * 1024, trustProxy });
 await app.register(cors, { origin: corsOrigins, credentials: true });
 await app.register(rateLimit, { global: false });
+
+const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web/dist");
+const serveFrontend = process.env.NODE_ENV === "production" && existsSync(path.join(webRoot, "index.html"));
+if (serveFrontend) {
+  await app.register(fastifyStatic, {
+    root: webRoot,
+    wildcard: false,
+    index: false,
+    cacheControl: false,
+  });
+  app.get("/", async (_request, reply) => reply.sendFile("index.html"));
+}
+
 app.get("/health", async (_request, reply) => {
   if (!prisma) return { status: "ok", service: "collab-api", persistence: "memory" };
   try {
@@ -246,6 +263,18 @@ if (prisma) {
   app.log.info("PostgreSQL persistence enabled");
 } else {
   app.log.warn("DATABASE_URL is unset; workspace data will only be kept in memory");
+}
+
+if (serveFrontend) {
+  app.setNotFoundHandler((request, reply) => {
+    const acceptsHtml = request.headers.accept?.includes("text/html");
+    const isApiOrSocket = request.url === "/api" || request.url.startsWith("/api/")
+      || request.url === "/socket.io" || request.url.startsWith("/socket.io/");
+    if (request.method === "GET" && acceptsHtml && !isApiOrSocket) {
+      return reply.type("text/html").sendFile("index.html");
+    }
+    return reply.code(404).send({ error: "Route not found" });
+  });
 }
 
 await app.listen({ port, host: "0.0.0.0" });

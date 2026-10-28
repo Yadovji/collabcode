@@ -17,6 +17,7 @@
     "@collab/shared": "*",
     "@fastify/cors": "^10.0.2",
     "@fastify/rate-limit": "^10.0.0",
+    "@fastify/static": "^10.1.5",
     "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "7.10.1",
     "dotenv": "^16.4.7",

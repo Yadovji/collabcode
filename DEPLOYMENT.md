@@ -10,25 +10,40 @@ docker compose --env-file .env.production -f docker-compose.production.yml up --
 
 Open `http://localhost:8080`. The stack can also run on a cloud Linux server with a DNS domain pointed at it. Set `PUBLIC_DOMAIN` and `PUBLIC_ORIGIN=https://<your-domain>`, allow inbound TCP 80 and 443, and start with `--profile internet`; Caddy handles HTTPS certificates. The web container is bound only to loopback and the API/database are internal to the Docker network.
 
-## Render environment variables
+## Render deployment
 
-| Service | Key | Value |
-| --- | --- | --- |
-| API Web Service | `NODE_ENV` | `production` (enables Secure session cookies) |
-| API Web Service | `TRUST_PROXY` | `1` (Render's trusted reverse-proxy hop; required for per-client IP rate limits) |
-| API Web Service | `WEB_ORIGIN` | Exact public origin of the static site, such as `https://your-site.onrender.com` |
-| API Web Service | `DATABASE_URL` | PostgreSQL connection string for a persistent hosted database |
-| API Web Service | `PORT` | Leave unset; Render supplies it |
-| Static Site | `VITE_API_URL` | API public URL, without a trailing slash |
+Use one Render **Web Service** for both the API and website. Serving both from one origin keeps the browser session cookie available to login, workspace requests, and Socket.IO without enabling cross-site cookies. The separate Static Site may remain in Render, but open the Web Service URL to use the app.
 
-The frontend value is read during `vite build`; trigger a new static-site deployment after changing it. The API CORS and Socket.IO configuration both use `WEB_ORIGIN`.
+| Web Service environment variable | Value |
+| --- | --- |
+| `NODE_ENV` | `production` (enables Secure session cookies and serves the built frontend) |
+| `TRUST_PROXY` | `1` (Render's trusted reverse-proxy hop; required for per-client IP rate limits) |
+| `WEB_ORIGIN` | This Web Service's exact public origin, e.g. `https://your-api.onrender.com` |
+| `DATABASE_URL` | PostgreSQL connection string for a persistent hosted database |
+| `PORT` | Leave unset; Render supplies it |
+
+Build command:
+
+```sh
+npm install && npm run build --workspace @collab/shared && npm run build --workspace @collab/api && npm run build --workspace @collab/web
+```
+
+Start command:
+
+```sh
+npm run db:migrate:deploy && npm run start --workspace @collab/api
+```
+
+Leave `VITE_API_URL` unset for this deployment. The frontend then calls the API on its own origin. After deployment, use the Web Service URL (not the Static Site URL).
+
+For a deployment with separate frontend and API origins, CORS and Socket.IO must use the frontend URL for `WEB_ORIGIN`. Cross-site session cookies may be blocked by browser privacy settings, so the single-origin setup above is preferred.
 
 ## Commands
 
-API build:
+API and frontend build:
 
 ```sh
-npm install && npm run build --workspace @collab/shared && npm run build --workspace @collab/api
+npm install && npm run build --workspace @collab/shared && npm run build --workspace @collab/api && npm run build --workspace @collab/web
 ```
 
 API start:
@@ -37,7 +52,7 @@ API start:
 npm run db:migrate:deploy && npm run start --workspace @collab/api
 ```
 
-Static frontend build:
+Optional standalone static frontend build:
 
 ```sh
 npm install && npm run build --workspace @collab/shared && npm run build --workspace @collab/web
@@ -45,7 +60,7 @@ npm install && npm run build --workspace @collab/shared && npm run build --works
 
 Static publish directory: `apps/web/dist`.
 
-Add the SPA rewrite `/*` to `/index.html` with status `200` in the static-site configuration. This allows `/room/<id>` links to load directly.
+If deploying a standalone static site, publish `apps/web/dist` and add the SPA rewrite `/*` to `/index.html` with status `200`. For Render, the single-origin setup above avoids cross-site session-cookie issues.
 
 ## PostgreSQL setup
 
