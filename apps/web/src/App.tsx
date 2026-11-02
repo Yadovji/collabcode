@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
-import { ArrowRight, Code2, FilePlus2, Folder, LockKeyhole, MessageSquare, MousePointer2, Network, Play, Radio, Sparkles, Users, Wifi, WifiOff } from "lucide-react";
+import { Archive, ArrowRight, Check, Code2, Download, FilePlus2, Folder, LockKeyhole, MessageSquare, MousePointer2, Network, Play, Radio, Search, Sparkles, Upload, Users, Wifi, WifiOff, X } from "lucide-react";
+import { strToU8, zipSync } from "fflate";
 import { DEFAULT_ROOM_ID, isSafeFilePath } from "@collab/shared";
 import { AuthPage } from "./AuthPage";
 import { apiRequest, useAuth } from "./auth";
@@ -19,28 +20,44 @@ function Home() {
   const { user, logout, logoutEverywhere } = useAuth();
   const [workspaces, setWorkspaces] = useState<Array<{ id: string; name: string; role: string }>>([]);
   const [workspaceError, setWorkspaceError] = useState("");
+  const [loadingWorkspaces, setLoadingWorkspaces] = useState(true);
+  const [sampleOpened, setSampleOpened] = useState(() => localStorage.getItem("collabcode-sample-opened") === "true");
+  const [inviteCompleted, setInviteCompleted] = useState(() => localStorage.getItem("collabcode-invite-completed") === "true");
   const revokeSessions = async () => {
     if (!window.confirm("Sign out this account from every browser and device?")) return;
     try { await logoutEverywhere(); }
     catch (error) { window.alert(error instanceof Error ? error.message : "Could not revoke sessions."); }
   };
-  useEffect(() => {
-    apiRequest("/api/workspaces")
-      .then(async (response) => {
-        const result = await response.json() as { workspaces?: Array<{ id: string; name: string; role: string }>; error?: string };
-        if (!response.ok) throw new Error(result.error || "Could not load workspaces.");
-        setWorkspaces(result.workspaces || []);
-      })
-      .catch((error: unknown) => setWorkspaceError(error instanceof Error ? error.message : "Could not load workspaces."));
+  const loadWorkspaces = useCallback(async () => {
+    setLoadingWorkspaces(true);
+    setWorkspaceError("");
+    try {
+      const response = await apiRequest("/api/workspaces");
+      const result = await response.json() as { workspaces?: Array<{ id: string; name: string; role: string }>; error?: string };
+      if (!response.ok) throw new Error(result.error || "Could not load workspaces.");
+      setWorkspaces(result.workspaces || []);
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : "Could not load workspaces.");
+    } finally {
+      setLoadingWorkspaces(false);
+    }
   }, []);
+  useEffect(() => { void loadWorkspaces(); }, [loadWorkspaces]);
+  const ownerWorkspace = workspaces.find((workspace) => workspace.role === "owner");
+  const openSample = () => {
+    localStorage.setItem("collabcode-sample-opened", "true");
+    setSampleOpened(true);
+    navigate(`/room/${DEFAULT_ROOM_ID}`);
+  };
+  const openInvite = () => navigate(ownerWorkspace ? `/room/${ownerWorkspace.id}?invite=1` : `/room/${makeRoomId()}?invite=1`);
   return <main className="landing">
     <nav className="landing-nav"><div className="brand"><span className="brand-mark"><Code2 size={17} /></span>collab<span>code</span></div><div className="landing-account"><span>{user?.email}</span><button className="quiet-link signout-button" onClick={() => void revokeSessions()}>Sign out everywhere</button><button className="quiet-link signout-button" onClick={() => void logout()}>Sign out</button></div></nav>
     <section className="hero">
-      <div className="eyebrow"><span className="eyebrow-dot" /> COLLABORATION, ACCESS AND CODE REVIEW · PHASE FIVE</div>
+      <div className="eyebrow"><span className="eyebrow-dot" /> A SHARED CODING ROOM FOR YOUR TEAM</div>
       <h1>Build together.<br /><em>See every change.</em></h1>
       <p className="hero-copy">A shared coding room for your team. Edit the same files in real time, then run a sandboxed preview of your HTML, CSS, and JavaScript website.</p>
       <button className="primary large" onClick={() => navigate(`/room/${makeRoomId()}`)}>Create a workspace <ArrowRight size={16} /></button>
-      <button className="text-button" onClick={() => navigate(`/room/${DEFAULT_ROOM_ID}`)}>Open the sample workspace</button>
+      <button className="text-button" onClick={openSample}>Open the sample workspace</button>
     </section>
     <section className="feature-strip">
       <div><div className="feature-icon violet"><MousePointer2 size={17} /></div><b>Shared editing</b><span>Monaco + Yjs</span></div>
@@ -48,10 +65,18 @@ function Home() {
       <div><div className="feature-icon green"><Network size={17} /></div><b>Room links</b><span>Share after inviting</span></div>
       <div><div className="feature-icon amber"><LockKeyhole size={17} /></div><b>Member access</b><span>Sign in and get invited</span></div>
     </section>
+    <section className="getting-started" aria-labelledby="getting-started-title">
+      <div className="getting-started-heading"><div><span className="eyebrow-dot" /><b id="getting-started-title">Getting started</b><small>A quick path from first visit to shared coding.</small></div><span>{Number(Boolean(ownerWorkspace)) + Number(sampleOpened) + Number(inviteCompleted)} of 3 complete</span></div>
+      <div className="getting-started-steps">
+        <button className={ownerWorkspace ? "guide-step complete" : "guide-step"} onClick={() => navigate(`/room/${makeRoomId()}`)}><span className="guide-check">{ownerWorkspace ? <Check size={13} /> : "1"}</span><span><b>Create a workspace</b><small>Start a private shared room.</small></span><ArrowRight size={14} /></button>
+        <button className={sampleOpened ? "guide-step complete" : "guide-step"} onClick={openSample}><span className="guide-check">{sampleOpened ? <Check size={13} /> : "2"}</span><span><b>Try the sample workspace</b><small>Explore a ready-made room first.</small></span><ArrowRight size={14} /></button>
+        <button className={inviteCompleted ? "guide-step complete" : "guide-step"} onClick={openInvite}><span className="guide-check">{inviteCompleted ? <Check size={13} /> : "3"}</span><span><b>Invite a teammate</b><small>They need a CollabCode account first.</small></span><ArrowRight size={14} /></button>
+      </div>
+    </section>
     <section className="workspace-list">
       <div className="workspace-list-heading"><div><b>Your workspaces</b><span>Rooms you own or have been invited to</span></div><span>{workspaces.length}</span></div>
-      {workspaceError && <p className="workspace-list-error">{workspaceError}</p>}
-      {workspaces.length ? workspaces.map((workspace) => <button className="workspace-card" key={workspace.id} onClick={() => navigate(`/room/${workspace.id}`)}><span className="workspace-card-icon"><Folder size={15} /></span><span className="workspace-card-info"><b>{workspace.name}</b><small>{workspace.id}</small></span><span className="workspace-role">{workspace.role}</span><ArrowRight size={14} /></button>) : !workspaceError && <p className="workspace-empty">No workspaces yet. Create one to get started.</p>}
+      {workspaceError && <div className="workspace-list-error" role="alert"><span>{workspaceError}</span><button onClick={() => void loadWorkspaces()}>Try again</button></div>}
+      {loadingWorkspaces ? <p className="workspace-empty" role="status">Loading your workspaces…</p> : workspaces.length ? workspaces.map((workspace) => <button className="workspace-card" key={workspace.id} onClick={() => navigate(`/room/${workspace.id}`)}><span className="workspace-card-icon"><Folder size={15} /></span><span className="workspace-card-info"><b>{workspace.name}</b><small>{workspace.id}</small></span><span className="workspace-role">{workspace.role}</span><ArrowRight size={14} /></button>) : !workspaceError && <div className="workspace-empty"><Folder size={19} /><b>Your workspaces will appear here</b><span>Create a room to begin, or open the sample to explore.</span><button className="primary" onClick={() => navigate(`/room/${makeRoomId()}`)}>Create your first workspace <ArrowRight size={13} /></button></div>}
     </section>
     <footer className="landing-footer">Built for focused collaboration <span>·</span> More workspace features are coming in later phases</footer>
   </main>;
@@ -70,6 +95,17 @@ function Room() {
   const [editorSelection, setEditorSelection] = useState("");
   const [reviewSelection, setReviewSelection] = useState<ReviewSelection | null>(null);
   const [copied, setCopied] = useState(false);
+  const [fileNotice, setFileNotice] = useState("");
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [quickSearch, setQuickSearch] = useState("");
+  const [quickSelection, setQuickSelection] = useState(0);
+  const [inviteOpen, setInviteOpen] = useState(() => new URLSearchParams(window.location.search).get("invite") === "1");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"editor" | "viewer">("editor");
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteFeedback, setInviteFeedback] = useState("");
+  const [inviteError, setInviteError] = useState("");
   const [tab, setTab] = useState("Explorer");
   const [chatOpen, setChatOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -80,6 +116,8 @@ function Room() {
   const [previewErrors, setPreviewErrors] = useState<string[]>([]);
   const [previewRunId, setPreviewRunId] = useState(0);
   const previewFrameRef = useRef<HTMLIFrameElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const quickSearchInputRef = useRef<HTMLInputElement>(null);
   const previewNeedsStarter = previewWarnings.some((warning) => warning.startsWith("Add index.html"));
   const refreshAccess = useCallback(async () => {
     try {
@@ -101,6 +139,26 @@ function Room() {
     if (workspace.filePaths.length && !workspace.filePaths.includes(activeFile)) setActiveFile(workspace.filePaths[0]);
   }, [workspace.filePaths, activeFile]);
   useEffect(() => { setEditorSelection(""); setReviewSelection(null); }, [activeFile]);
+  useEffect(() => {
+    if (quickOpen) requestAnimationFrame(() => quickSearchInputRef.current?.focus());
+  }, [quickOpen]);
+  useEffect(() => {
+    const onShortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "p") {
+        event.preventDefault();
+        setQuickSearch("");
+        setQuickSelection(0);
+        setQuickOpen(true);
+      }
+      if (event.key === "Escape") {
+        setQuickOpen(false);
+        setInviteOpen(false);
+        setMobileSidebarOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onShortcut);
+    return () => window.removeEventListener("keydown", onShortcut);
+  }, []);
 
   const createFile = () => {
     if (currentRole === "viewer") return;
@@ -122,20 +180,30 @@ function Room() {
       window.setTimeout(() => setCopied(false), 1800);
     } catch { window.prompt("Copy this workspace link", window.location.href); }
   };
-  const inviteMember = async () => {
+  const inviteMember = () => {
     if (!canManageAccess) return;
-    const email = window.prompt("Enter the email of a teammate who already has a CollabCode account.");
-    if (!email?.trim()) return;
-    const role = window.prompt("Choose access: editor or viewer", "editor")?.trim().toLowerCase();
-    if (role !== "editor" && role !== "viewer") { if (role) window.alert("Enter editor or viewer."); return; }
+    setInviteEmail("");
+    setInviteRole("editor");
+    setInviteError("");
+    setInviteFeedback("");
+    setInviteOpen(true);
+  };
+  const submitInvite = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!canManageAccess || !inviteEmail.trim() || inviteBusy) return;
+    setInviteBusy(true);
+    setInviteError("");
     try {
-      const response = await apiRequest(`/api/workspaces/${encodeURIComponent(roomId)}/members`, { method: "POST", body: JSON.stringify({ email, role }) });
+      const response = await apiRequest(`/api/workspaces/${encodeURIComponent(roomId)}/members`, { method: "POST", body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }) });
       const result = await response.json() as { message?: string; error?: string };
       if (!response.ok) throw new Error(result.error || "Could not invite that account.");
       await refreshAccess();
-      window.alert(result.message || "Member added. Share the room link with them.");
+      localStorage.setItem("collabcode-invite-completed", "true");
+      setInviteFeedback(result.message || "Workspace access granted. Copy the room link and send it to your teammate.");
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Could not invite that account.");
+      setInviteError(error instanceof Error ? error.message : "Could not invite that account.");
+    } finally {
+      setInviteBusy(false);
     }
   };
   const changeMemberRole = async (member: { id: string; name: string }, role: "editor" | "viewer") => {
@@ -159,6 +227,57 @@ function Room() {
     }
   };
   const activeText = workspace.files.get(activeFile);
+  const quickMatches = workspace.filePaths.filter((path) => path.toLowerCase().includes(quickSearch.trim().toLowerCase())).slice(0, 30);
+
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const downloadCurrentFile = () => {
+    const text = workspace.files.get(activeFile)?.toString();
+    if (text === undefined) return;
+    downloadBlob(new Blob([text], { type: "text/plain;charset=utf-8" }), activeFile.split("/").pop() || "workspace-file.txt");
+  };
+  const downloadWorkspaceZip = () => {
+    if (!workspace.filePaths.length) return;
+    const files = Object.fromEntries(workspace.filePaths.map((path) => [path, strToU8(workspace.files.get(path)?.toString() || "")]));
+    const archive = zipSync(files, { level: 6 });
+    downloadBlob(new Blob([archive.buffer as ArrayBuffer], { type: "application/zip" }), `${roomId}-workspace.zip`);
+  };
+  const uploadFiles = async (event: ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(event.currentTarget.files || []);
+    event.currentTarget.value = "";
+    if (!selectedFiles.length) return;
+    const occupied = new Set(workspace.filePaths);
+    const additions: Array<{ path: string; contents: string }> = [];
+    const skipped: string[] = [];
+    for (const file of selectedFiles) {
+      const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+      const path = relativePath.replace(/\\/g, "/").split("/")
+        .map((part) => part.normalize("NFKC").replace(/\s+/g, "_").replace(/[^\w.-]/g, "_").replace(/^\.+/, "").replace(/\.+$/, ""))
+        .filter(Boolean).join("/");
+      if (!isSafeFilePath(path)) { skipped.push(`${file.name}: unsafe file name`); continue; }
+      if (file.size > 100_000) { skipped.push(`${path}: over 100 KB`); continue; }
+      if (occupied.has(path)) { skipped.push(`${path}: already exists`); continue; }
+      if (workspace.filePaths.length + additions.length >= 100) { skipped.push(`${path}: workspace file limit reached`); continue; }
+      const contents = await file.text();
+      if (contents.includes("\u0000") || new TextEncoder().encode(contents).byteLength > 100_000) { skipped.push(`${path}: not a supported text file`); continue; }
+      occupied.add(path);
+      additions.push({ path, contents });
+    }
+    for (const file of additions) workspace.createFile(file.path, file.contents);
+    if (additions.length) setActiveFile(additions[0].path);
+    setFileNotice(`${additions.length} file${additions.length === 1 ? "" : "s"} added to the shared room${skipped.length ? ` · ${skipped.length} skipped (${skipped.slice(0, 2).join("; ")}${skipped.length > 2 ? "; …" : ""})` : ""}.`);
+  };
+  const selectFile = (path: string) => {
+    setActiveFile(path);
+    setQuickOpen(false);
+    setMobileSidebarOpen(false);
+  };
 
   const runWebsitePreview = () => {
     const snapshot = Object.create(null) as Record<string, string>;
@@ -198,7 +317,9 @@ function Room() {
       <a className="brand compact" href="/"><span className="brand-mark"><Code2 size={16} /></span>collab<span>code</span></a>
       <div className="crumb"><span className="crumb-divider">/</span><span className="crumb-project">Untitled workspace</span><span className="room-chip">{roomId}</span></div>
       <div className="top-actions">
-        <div className={`connection ${workspace.connected ? "is-connected" : "is-offline"}`}>{workspace.connected ? <Wifi size={14} /> : <WifiOff size={14} />}<span>{workspace.connected ? "Connected" : "Reconnecting"}</span></div>
+        <div className={`connection ${!workspace.connected ? "is-offline" : workspace.synced ? "is-connected" : "is-syncing"}`} aria-label={!workspace.connected ? "Connection lost; reconnecting" : workspace.synced ? "Connected and all changes synced" : "Connected; loading shared workspace"} aria-live="polite" title={!workspace.connected ? "Trying to reconnect. Your local changes will sync when the connection returns." : workspace.synced ? "All changes are synced with the room." : "Connected; loading the shared workspace."}>
+          {workspace.connected ? <Wifi size={14} /> : <WifiOff size={14} />}<span>{!workspace.connected ? workspace.error ? "Connection issue · retrying" : "Connecting…" : workspace.synced ? "Live · synced" : "Loading workspace…"}</span>
+        </div>
         <div className="avatar-stack" title={`${workspace.users.length} people in this room`}>
           {workspace.users.slice(0, 3).map((user, index) => <span className="avatar" style={{ background: user.color, zIndex: 4 - index }} key={`${user.name}-${index}`}>{user.name.slice(0, 1).toUpperCase()}</span>)}
           <span className="people-count"><Users size={12} /> {workspace.users.length}</span>
@@ -209,22 +330,32 @@ function Room() {
 
     <div className="workspace-grid">
       <aside className="activitybar">
-        <button className={tab === "Explorer" ? "activity active" : "activity"} title="Explorer" onClick={() => setTab("Explorer")}><Folder size={19} /></button>
-        <button className={tab === "Collaboration" ? "activity active" : "activity"} title="Collaboration" onClick={() => setTab("Collaboration")}><Users size={19} /></button>
-        <button className={tab === "Review" ? "activity active" : "activity"} title="Review and history" onClick={() => setTab("Review")}><MessageSquare size={18} /></button>
+        <button className={tab === "Explorer" ? "activity active" : "activity"} aria-label="Open file explorer" title="Explorer" onClick={() => { setMobileSidebarOpen((open) => tab === "Explorer" ? !open : true); setTab("Explorer"); }}><Folder size={19} /></button>
+        <button className={tab === "Collaboration" ? "activity active" : "activity"} aria-label="Open collaboration and invitations" title="Collaboration" onClick={() => { setTab("Collaboration"); setMobileSidebarOpen(true); }}><Users size={19} /></button>
+        <button className={tab === "Review" ? "activity active" : "activity"} aria-label="Open review and history" title="Review and history" onClick={() => { setTab("Review"); setMobileSidebarOpen(true); }}><MessageSquare size={18} /></button>
         <div className="activity-spacer" />
         <div className="activity-logo"><Code2 size={17} /></div>
       </aside>
 
-      <aside className="sidebar">
-        <div className="side-heading"><span>{tab === "Explorer" ? "EXPLORER" : tab === "Review" ? "REVIEW & HISTORY" : "COLLABORATION"}</span>{tab === "Explorer" && currentRole !== "viewer" && <button className="icon-button" title="New file" onClick={createFile}><FilePlus2 size={15} /></button>}</div>
+      <aside className={`sidebar ${mobileSidebarOpen ? "mobile-open" : ""}`}>
+        <div className="side-heading"><span>{tab === "Explorer" ? "EXPLORER" : tab === "Review" ? "REVIEW & HISTORY" : "COLLABORATION"}</span><button className="mobile-close icon-button" aria-label="Close side panel" onClick={() => setMobileSidebarOpen(false)}><X size={15} /></button></div>
         {tab === "Explorer" ? <>
-          <div className="project-row"><Folder size={14} fill="currentColor" /><b>COLLAB WORKSPACE</b>{currentRole !== "viewer" && <button className="icon-button tiny" onClick={createFile}><FilePlus2 size={14} /></button>}</div>
+          <div className="project-row"><Folder size={14} fill="currentColor" /><b>COLLAB WORKSPACE</b></div>
+          <div className="file-tools" role="group" aria-label="Workspace file actions">
+            <button className="icon-button" aria-label="New file" title="New file" disabled={currentRole === "viewer"} onClick={createFile}><FilePlus2 size={14} /></button>
+            <button className="icon-button" aria-label="Upload text files" title="Upload text/code files (up to 100 KB each)" disabled={currentRole === "viewer" || !workspace.synced} onClick={() => fileInputRef.current?.click()}><Upload size={14} /></button>
+            <button className="icon-button" aria-label="Download selected file" title="Download selected file" disabled={!workspace.files.has(activeFile)} onClick={downloadCurrentFile}><Download size={14} /></button>
+            <button className="icon-button" aria-label="Download workspace ZIP" title="Download all workspace files as ZIP" disabled={!workspace.filePaths.length} onClick={downloadWorkspaceZip}><Archive size={14} /></button>
+            <button className="icon-button" aria-label="Find a file" title="Find a file (Ctrl+P)" onClick={() => { setQuickSearch(""); setQuickSelection(0); setQuickOpen(true); }}><Search size={14} /></button>
+            <input ref={fileInputRef} className="visually-hidden" type="file" multiple accept="text/*,.html,.htm,.css,.js,.jsx,.ts,.tsx,.json,.xml,.svg,.yml,.yaml,.sql,.sh,.c,.cpp,.h,.hpp,.go,.rs,.rb,.php,.ipynb" onChange={(event) => void uploadFiles(event)} />
+          </div>
+          {fileNotice && <p className="file-notice" role="status">{fileNotice}</p>}
           <div className="file-list">
-            {workspace.filePaths.map((path) => <div key={path} className={`file-row ${activeFile === path ? "selected" : ""}`} onClick={() => setActiveFile(path)}>
-              <span className={`file-dot ${path.endsWith(".ts") ? "ts" : path.endsWith(".json") ? "json" : "md"}`}>{path.endsWith(".ts") ? "TS" : path.endsWith(".json") ? "{}" : "M"}</span><span>{path}</span>
-              {currentRole !== "viewer" && workspace.filePaths.length > 1 && <button className="delete-file" title={`Delete ${path}`} onClick={(event) => { event.stopPropagation(); if (window.confirm(`Delete ${path}?`)) workspace.deleteFile(path); }}>×</button>}
+            {workspace.filePaths.map((path) => <div key={path} className={`file-row ${activeFile === path ? "selected" : ""}`}>
+              <button type="button" className="file-open" aria-current={activeFile === path ? "page" : undefined} onClick={() => selectFile(path)}><span className={`file-dot ${path.endsWith(".ts") ? "ts" : path.endsWith(".json") ? "json" : "md"}`}>{path.endsWith(".ts") ? "TS" : path.endsWith(".json") ? "{}" : "M"}</span><span>{path}</span></button>
+              {currentRole !== "viewer" && workspace.filePaths.length > 1 && <button className="delete-file" aria-label={`Delete ${path}`} title={`Delete ${path}`} onClick={() => { if (window.confirm(`Delete ${path}?`)) workspace.deleteFile(path); }}>×</button>}
             </div>)}
+            {!workspace.filePaths.length && <div className="file-empty"><Folder size={19} /><b>This room has no files yet</b><span>Start with a website or create a blank file.</span><button onClick={createWebsiteStarter}>Create sample website</button><button onClick={createFile} disabled={currentRole === "viewer"}>Create a blank file</button></div>}
           </div>
         </> : tab === "Collaboration" ? <div className="collab-panel">
           <p className="section-label">IN THIS ROOM <span>{workspace.users.length}</span></p>
@@ -236,7 +367,7 @@ function Room() {
               <span className="access-member-info"><b>{member.name}</b><small>{member.email}</small></span>
               {member.role !== "owner" && <div className="access-member-actions"><select aria-label={`Role for ${member.name}`} value={member.role} onChange={(event) => void changeMemberRole(member, event.target.value as "editor" | "viewer")}><option value="editor">Editor</option><option value="viewer">Viewer</option></select><button className="remove-member" title={`Remove ${member.name}`} aria-label={`Remove ${member.name}`} onClick={() => void removeMember(member)}>Remove</button></div>}
             </div>) : <p className="access-hint">Only the workspace owner can manage invited accounts.</p>}
-            {canManageAccess && <button className="invite-wide" onClick={inviteMember}>Invite a registered member</button>}
+            {canManageAccess && <><p className="access-hint">Your teammate must have an account. Add their email, then share this room link.</p><button className="invite-wide" onClick={inviteMember}>Invite a registered member</button></>}
           </div>
         </div> : <ReviewPanel roomId={roomId} filePath={activeFile} selection={reviewSelection} userId={authenticatedUser?.id || ""} canEdit={currentRole !== "viewer"} canManage={canManageAccess} />}
         <div className="sidebar-bottom"><div className="bottom-user"><span className="avatar small-avatar self-avatar">{workspace.user.name.slice(0, 1).toUpperCase()}</span><span className="user-meta"><b>{workspace.user.name}</b><small>{currentRole} access</small></span><button className="icon-button" title="Change display name" onClick={workspace.changeName}>···</button></div></div>
@@ -256,8 +387,8 @@ function Room() {
           </section> : activeText && workspace.synced ? <CollaborativeEditor key={activeFile} path={activeFile} text={activeText} awareness={workspace.awareness} readOnly={currentRole === "viewer"} onSelectionChange={setEditorSelection} onReviewSelectionChange={setReviewSelection} /> : <div className="loading-editor"><div className="loader" />Connecting to shared workspace…</div>}
         </div>
         <div className="bottom-panel">
-          <div className="panel-tabs"><button className="panel-tab active"><span className="terminal-glyph">&gt;_</span> OUTPUT</button><button className="panel-tab" onClick={() => setChatOpen(!chatOpen)}>COLLABORATION</button><span className="panel-status"><span className="status-green" /> WORKSPACE READY</span></div>
-          {chatOpen ? <div className="panel-content"><div className="panel-message"><Sparkles size={15} /><span>Live editing is on. Only invited accounts can open this room.</span></div>{canManageAccess ? <button className="panel-action" onClick={inviteMember}>Invite a teammate <ArrowRight size={13} /></button> : <div className="terminal-hint">Only the workspace owner can invite teammates.</div>}</div> : <div className="panel-content"><div className="terminal-line"><span className="terminal-prompt">›</span><span>{previewOpen ? "Website preview is isolated in a browser sandbox." : "CollabCode Phase 5 ready"}</span></div><div className="terminal-hint">{previewOpen ? "Edits sync live. Press Run preview again to refresh the page." : "Use Run preview for a shared HTML, CSS, and JavaScript website. Server-side code execution is not enabled."}</div></div>}
+          <div className="panel-tabs"><button className="panel-tab active"><span className="terminal-glyph">&gt;_</span> OUTPUT</button><button className="panel-tab" onClick={() => setChatOpen(!chatOpen)}>COLLABORATION</button><span className="panel-status" role="status" aria-live="polite"><span className={!workspace.connected ? "status-amber" : workspace.synced ? "status-green" : "status-amber"} />{!workspace.connected ? "RECONNECTING" : workspace.synced ? "ALL CHANGES SYNCED" : "SYNCING WORKSPACE"}</span></div>
+          {chatOpen ? <div className="panel-content"><div className="panel-message"><Sparkles size={15} /><span>Live editing is on. Only invited accounts can open this room.</span></div>{canManageAccess ? <button className="panel-action" onClick={inviteMember}>Invite a teammate <ArrowRight size={13} /></button> : <div className="terminal-hint">Only the workspace owner can invite teammates.</div>}</div> : <div className="panel-content"><div className="terminal-line"><span className="terminal-prompt">›</span><span>{previewOpen ? "Website preview is isolated in a browser sandbox." : workspace.synced ? "Workspace is ready to edit." : "Connecting to the shared workspace…"}</span></div><div className="terminal-hint">{previewOpen ? "Edits sync live. Press Run preview again to refresh the page." : "Use Run preview for a shared HTML, CSS, and JavaScript website. Your edits sync to collaborators automatically."}</div></div>}
         </div>
       </main>
       <aside className="right-rail">
@@ -275,7 +406,38 @@ function Room() {
       </aside>
     </div>
     {aiMounted && <AiAssistant roomId={roomId} activePath={activeFile} selection={editorSelection} open={aiOpen} readFiles={() => Object.fromEntries([...workspace.files.entries()].map(([path, text]) => [path, text.toString()]))} onClose={() => setAiOpen(false)} />}
-    <footer className="statusbar"><div><span className="status-green" /> Ready</div><div><span>Room: {roomId}</span><span>UTF-8</span><span>{previewOpen ? "HTML preview" : "TypeScript"}</span><span>Phase 5 prototype</span></div></footer>
+    {quickOpen && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setQuickOpen(false); }}>
+      <section className="quick-open-dialog" role="dialog" aria-modal="true" aria-labelledby="quick-open-title">
+        <div className="quick-open-title"><div><Search size={16} /><b id="quick-open-title">Open a file</b><small>Type part of a file name. Press Ctrl+P anytime.</small></div><button className="icon-button" aria-label="Close file search" onClick={() => setQuickOpen(false)}><X size={16} /></button></div>
+        <input ref={quickSearchInputRef} type="search" value={quickSearch} placeholder="Search workspace files…" aria-label="Search workspace files" onChange={(event) => { setQuickSearch(event.target.value); setQuickSelection(0); }} onKeyDown={(event) => {
+          if (event.key === "ArrowDown") { event.preventDefault(); setQuickSelection((index) => Math.min(index + 1, Math.max(0, quickMatches.length - 1))); }
+          if (event.key === "ArrowUp") { event.preventDefault(); setQuickSelection((index) => Math.max(0, index - 1)); }
+          if (event.key === "Enter" && quickMatches[quickSelection]) { event.preventDefault(); selectFile(quickMatches[quickSelection]); }
+        }} />
+        <div className="quick-open-results" role="listbox" aria-label="Matching files">
+          {quickMatches.map((path, index) => <button key={path} id={`quick-file-${index}`} role="option" aria-selected={index === quickSelection} className={index === quickSelection ? "quick-file selected" : "quick-file"} onMouseEnter={() => setQuickSelection(index)} onClick={() => selectFile(path)}><span className="file-dot">{path.split(".").pop()?.toUpperCase().slice(0, 3)}</span>{path}<ArrowRight size={13} /></button>)}
+          {!quickMatches.length && <p className="quick-open-empty">No files match “{quickSearch}”. Try another name or create a file.</p>}
+        </div>
+      </section>
+    </div>}
+    {inviteOpen && canManageAccess && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setInviteOpen(false); }}>
+      <section className="invite-dialog" role="dialog" aria-modal="true" aria-labelledby="invite-title">
+        <div className="invite-dialog-heading"><div className="invite-dialog-icon"><Users size={17} /></div><button className="icon-button" aria-label="Close invitation dialog" onClick={() => setInviteOpen(false)}><X size={16} /></button></div>
+        <p className="auth-eyebrow">WORKSPACE ACCESS</p><h2 id="invite-title">Invite a teammate</h2>
+        <p className="invite-help">Add their CollabCode account email, then send them this room link. They need to sign up before you can add them.</p>
+        <form onSubmit={(event) => void submitInvite(event)}>
+          <label htmlFor="invite-email">Teammate’s account email</label>
+          <input id="invite-email" autoFocus type="email" autoComplete="email" required maxLength={254} value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="name@example.com" />
+          <label className="invite-role-label" htmlFor="invite-role">Access level</label>
+          <select id="invite-role" value={inviteRole} onChange={(event) => setInviteRole(event.target.value as "editor" | "viewer")}><option value="editor">Editor · can edit files</option><option value="viewer">Viewer · can read files</option></select>
+          {inviteError && <p className="dialog-error" role="alert">{inviteError}</p>}
+          {inviteFeedback && <p className="dialog-success" role="status">{inviteFeedback}</p>}
+          {!inviteFeedback && <button className="primary invite-submit" type="submit" disabled={inviteBusy || !inviteEmail.trim()}>{inviteBusy ? "Adding access…" : "Add teammate"}<ArrowRight size={14} /></button>}
+        </form>
+        {inviteFeedback && <div className="invite-dialog-actions"><button className="primary" onClick={() => void shareRoom()}>{copied ? "Link copied" : "Copy room link"}<ArrowRight size={14} /></button><button className="quiet-link" onClick={() => setInviteOpen(false)}>Done</button></div>}
+      </section>
+    </div>}
+    <footer className="statusbar"><div><span className={workspace.connected ? "status-green" : "status-amber"} />{!workspace.connected ? "Reconnecting" : workspace.synced ? "Ready" : "Syncing"}</div><div><span>Room: {roomId}</span><span>UTF-8</span><span>{previewOpen ? "HTML preview" : activeFile.split(".").pop()?.toUpperCase() || "Text"}</span><span>CollabCode</span></div></footer>
   </div>;
 }
 
