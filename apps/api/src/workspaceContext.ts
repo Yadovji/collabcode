@@ -25,6 +25,31 @@ function collectImports(source: string): string[] {
     .map((match) => match[1]).slice(0, 20);
 }
 
+export function analyzeWorkspaceSource(source: string) {
+  return { symbols: collectSymbols(source), imports: collectImports(source) };
+}
+
+export function isWorkspaceFileIndexable(name: string, source: string): boolean {
+  const parts = name.toLowerCase().replaceAll("\\", "/").split("/");
+  const base = parts.at(-1) || "";
+  const extension = base.includes(".") ? `.${base.split(".").pop()}` : "";
+  const sensitiveContent = [
+    /-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----/,
+    /\bAKIA[0-9A-Z]{16}\b/,
+    /\bAIza[0-9A-Za-z_-]{35}\b/,
+    /\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,})\b/
+  ];
+  return !parts.some((part) => sensitiveDirectories.has(part))
+    && !/^\.env(?:\.|$)/i.test(base)
+    && !/^\.(npmrc|pypirc|netrc|dockerconfigjson)$/i.test(base)
+    && !/^(id_rsa|id_ed25519|id_ecdsa|id_dsa)(?:\..*)?$/i.test(base)
+    && !/(\.pem|\.key|\.p12|\.pfx|\.p8|\.der|\.crt|\.cer|credentials?|secrets?|service-account)(?:$|[._-])/i.test(base)
+    && !binaryExtensions.has(extension)
+    && !source.includes("\0")
+    && Buffer.byteLength(source, "utf8") <= 100_000
+    && !sensitiveContent.some((pattern) => pattern.test(source));
+}
+
 function makeSnippet(source: string, terms: string[], active: boolean) {
   const lines = source.split("\n");
   if (active || source.length <= 1600) {
@@ -53,23 +78,12 @@ export function selectWorkspaceContext(
   maxFiles = 16
 ) {
   const terms = prompt.toLowerCase().match(/[a-z0-9_./-]{3,}/g) || [];
-  const files = [...entries].filter(([name, text]) => {
-    const parts = name.toLowerCase().split("/");
-    const base = parts.at(-1) || "";
-    const extension = base.includes(".") ? `.${base.split(".").pop()}` : "";
-    return !parts.some((part) => sensitiveDirectories.has(part))
-      && !/^\.env(?:\.|$)/i.test(base)
-      && !/^\.(npmrc|pypirc|netrc|dockerconfigjson)$/.test(base)
-      && !/^(id_rsa|id_ed25519|id_ecdsa|id_dsa)(?:\..*)?$/.test(base)
-      && !/(\.pem|\.key|\.p12|\.pfx|\.p8|\.der|\.crt|\.cer|credentials?|secrets?|service-account)(?:$|[._-])/i.test(base)
-      && !binaryExtensions.has(extension)
-      && !text.toString().includes("\0");
-  }).map(([name, text]) => {
-    const source = text.toString();
+  const files = [...entries].map(([name, text]) => ({ name, source: text.toString() }))
+    .filter(({ name, source }) => isWorkspaceFileIndexable(name, source)).map(({ name, source }) => {
     const searchable = `${name}\n${source}`.toLowerCase();
     const score = terms.reduce((total, term) => total + (searchable.includes(term) ? 1 : 0), 0) + (name === activePath ? 100 : 0);
-    return { name, source, score };
+    return { name, source, score, ...analyzeWorkspaceSource(source) };
   }).sort((a, b) => Number(b.name === activePath) - Number(a.name === activePath) || b.score - a.score || a.name.localeCompare(b.name)).slice(0, maxFiles)
-    .map(({ name, source }) => ({ name, ...makeSnippet(source, terms, name === activePath), symbols: collectSymbols(source), imports: collectImports(source) }));
+    .map(({ name, source, symbols, imports }) => ({ name, ...makeSnippet(source, terms, name === activePath), symbols, imports }));
   return JSON.stringify({ activeFile: activePath || null, selection: selection.slice(0, 12000), files });
 }

@@ -24,6 +24,8 @@ Use one Render **Web Service** for both the API and website. Serving both from o
 | `GEMINI_API_KEY` | Private Google Gemini Developer API key, set only on the API service |
 | `GEMINI_MODEL` | Optional model ID; defaults to `gemini-3.8-flash` |
 | `GEMINI_COMPLEX_MODEL` | Optional model for Build planning; defaults to `gemini-3.1-pro-preview` |
+| `GEMINI_EMBEDDING_MODEL` | Optional model for workspace code embeddings; defaults to `gemini-embedding-001` |
+| `AI_DAILY_TOKEN_LIMIT` | Daily per-user, per-workspace input/output token budget; defaults to `100000` |
 | `PORT` | Leave unset; Render supplies it |
 
 Build command:
@@ -68,7 +70,7 @@ If deploying a standalone static site, publish `apps/web/dist` and add the SPA r
 
 ## PostgreSQL setup
 
-Set `DATABASE_URL` on the API service before starting it. Run the Prisma migration during deployment with `npm run db:migrate:deploy` after building the API and before starting the service. PostgreSQL is required for accounts, sessions, workspace membership, and workspace snapshots.
+Set `DATABASE_URL` on the API service before starting it. The database must support pgvector and allow `CREATE EXTENSION vector`; the additive migration enables the extension and creates workspace-scoped AI indexing tables. Run the Prisma migration during deployment with `npm run db:migrate:deploy` after building the API and before starting the service. PostgreSQL is required for accounts, sessions, workspace membership, workspace snapshots, and AI persistence.
 
 ## Before production use
 

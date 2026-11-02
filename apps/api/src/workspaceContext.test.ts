@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { selectWorkspaceContext } from "./workspaceContext.js";
+import { isWorkspaceFileIndexable, selectWorkspaceContext } from "./workspaceContext.js";
 
 const asEntries = (files: Record<string, string>) => Object.entries(files).map(([path, text]) => [path, { toString: () => text }] as [string, { toString(): string }]);
 
@@ -51,4 +51,10 @@ test("retrieves a relevant deep line window with symbol and import metadata", ()
   assert.ok(file.lineStart <= 71 && file.lineEnd >= 71);
   assert.ok(file.symbols.some((symbol) => symbol.name === "ValidationService" && symbol.line === 71));
   assert.ok(file.imports.includes("./session.js"));
+});
+
+test("indexing rejects private keys and common provider credentials in source files", () => {
+  assert.equal(isWorkspaceFileIndexable("src/key.ts", "-----BEGIN PRIVATE KEY-----\nexample\n-----END PRIVATE KEY-----"), false);
+  assert.equal(isWorkspaceFileIndexable("src/token.ts", `const token = "ghp_${"a".repeat(36)}";`), false);
+  assert.equal(isWorkspaceFileIndexable("src/app.ts", "export const app = true;"), true);
 });

@@ -19,6 +19,8 @@ model Workspace {
   members WorkspaceMember[]
   aiConversations AiConversation[]
   aiUsage AiUsage[]
+  aiCodeChunks AiCodeChunk[]
+  aiIndexStatus AiWorkspaceIndex?
 
   @@index([ownerId])
 }
@@ -107,4 +109,39 @@ model AiUsage {
 
   @@index([userId, createdAt])
   @@index([workspaceId, createdAt])
+}
+
+model AiCodeChunk {
+  id             String   @id @db.VarChar(30)
+  workspaceId    String   @db.VarChar(80)
+  path           String   @db.Text
+  chunkIndex     Int
+  fileHash        String   @db.VarChar(64)
+  content         String   @db.Text
+  lineStart       Int
+  lineEnd         Int
+  symbols         Json
+  imports         Json
+  embedding       Unsupported("vector(768)")?
+  embeddingModel  String   @db.VarChar(100)
+  updatedAt       DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, path, chunkIndex], map: "AiCodeChunk_workspaceId_path_chunkIndex_key")
+  @@index([workspaceId, path], map: "AiCodeChunk_workspaceId_path_idx")
+}
+
+model AiWorkspaceIndex {
+  workspaceId     String   @id @db.VarChar(80)
+  status           String   @default("pending") @db.VarChar(20)
+  embeddingModel  String   @db.VarChar(100)
+  fileCount        Int      @default(0)
+  chunkCount       Int      @default(0)
+  truncated        Boolean  @default(false)
+  lastError        String?  @db.Text
+  indexedAt        DateTime?
+  updatedAt        DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }

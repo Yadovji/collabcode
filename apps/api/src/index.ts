@@ -15,6 +15,7 @@ import { persistenceEnabled, prisma } from "./db.js";
 import { loadWorkspaceDocument, saveWorkspaceDocument } from "./workspaceStore.js";
 import { ensureWorkspaceAccess, registerWorkspaceRoutes } from "./workspaceAccess.js";
 import { registerAiRoutes } from "./ai.js";
+import { scheduleWorkspaceIndex } from "./workspaceIndex.js";
 
 const port = Number(process.env.PORT || 4000);
 const webOrigin = process.env.WEB_ORIGIN || "http://localhost:5174";
@@ -104,6 +105,10 @@ async function getRoom(roomId: string, io: Server): Promise<Room> {
     const doc = await loadWorkspaceDocument(roomId);
     const awareness = new Awareness(doc);
     const room: Room = { id: roomId, doc, awareness, sockets: new Set(), persistenceQueue: Promise.resolve() };
+    const scheduleIndex = () => scheduleWorkspaceIndex(roomId, () => {
+      const files = doc.getMap<Y.Text>("files");
+      return [...files.entries()].map(([path, text]) => [path, text.toString()] as [string, string]);
+    });
 
     doc.on("update", (update: Uint8Array) => {
       // Yjs updates are idempotent, so echoing to the sender is safe. This also
@@ -112,6 +117,7 @@ async function getRoom(roomId: string, io: Server): Promise<Room> {
         io.to(socketId).emit(SOCKET_EVENTS.documentUpdate, update);
       }
       schedulePersistence(room);
+      scheduleIndex();
     });
     awareness.on("update", ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] }, origin: unknown) => {
       const changed = [...added, ...updated, ...removed];
@@ -128,6 +134,7 @@ async function getRoom(roomId: string, io: Server): Promise<Room> {
       }
     });
     rooms.set(roomId, room);
+    scheduleIndex();
     return room;
   })();
   roomLoads.set(roomId, loading);

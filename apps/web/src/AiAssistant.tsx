@@ -9,6 +9,8 @@ type ProposedFile = { path: string; content: string; base: string | null };
 type Proposal = { files: ProposedFile[]; selectedPath: string };
 type Message = { role: "user" | "assistant"; text: string };
 type Conversation = { id: string; title: string };
+type Usage = { dailyUsed: number; dailyLimit: number; last30Days: number };
+type IndexStatus = { enabled: boolean; status: string; fileCount: number; chunkCount: number; truncated: boolean; lastError?: string | null };
 
 export function AiAssistant({ roomId, activePath, selection, open, readFiles, onClose }: {
   roomId: string; activePath: string; selection: string; open: boolean; readFiles: () => Record<string, string>;
@@ -24,6 +26,8 @@ export function AiAssistant({ roomId, activePath, selection, open, readFiles, on
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [available, setAvailable] = useState<boolean | null>(null);
+  const [usage, setUsage] = useState<Usage | null>(null);
+  const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const language = useMemo(() => activePath.split(".").pop() || "plaintext", [activePath]);
 
@@ -34,6 +38,34 @@ export function AiAssistant({ roomId, activePath, selection, open, readFiles, on
     }).catch(() => { if (alive) setAvailable(false); });
     return () => { alive = false; };
   }, []);
+
+  const refreshUsage = async () => {
+    try {
+      const response = await apiRequest(`/api/workspaces/${encodeURIComponent(roomId)}/ai/usage`);
+      if (response.ok) setUsage(await response.json() as Usage);
+    } catch { /* Usage display is informational and does not block the assistant. */ }
+  };
+
+  useEffect(() => { void refreshUsage(); }, [roomId]);
+
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const refresh = async () => {
+      try {
+        const response = await apiRequest(`/api/workspaces/${encodeURIComponent(roomId)}/ai/index`);
+        if (response.ok) {
+          const status = await response.json() as IndexStatus;
+          if (!alive) return;
+          setIndexStatus(status);
+          if (status.enabled && (status.status === "pending" || status.status === "indexing")) timer = setTimeout(() => void refresh(), 2500);
+        }
+      } catch { /* Index status is informational and does not block the assistant. */ }
+    };
+    void refresh();
+    return () => { alive = false; if (timer) clearTimeout(timer); };
+  }, [roomId, open]);
 
   useEffect(() => {
     let alive = true;
@@ -128,6 +160,7 @@ export function AiAssistant({ roomId, activePath, selection, open, readFiles, on
           if (files.length) setProposal({ files, selectedPath: files[0].path });
         } catch (err) { setError(err instanceof Error ? err.message : "Could not parse the proposed changes."); }
       }
+      void refreshUsage();
     } catch (err) {
       if (!controller.signal.aborted) setError(err instanceof Error ? err.message : "AI request failed.");
     } finally { setBusy(false); abortRef.current = null; }
@@ -149,7 +182,8 @@ export function AiAssistant({ roomId, activePath, selection, open, readFiles, on
     <header className="ai-header"><div><b>AI Assistant</b><small>Workspace context · Gemini · History saved to your account</small></div><button className="ai-close" onClick={onClose} aria-label="Close AI assistant">×</button></header>
     <div className="ai-history"><select aria-label="Conversation history" value={conversationId || ""} onChange={(event) => void selectConversation(event.target.value)}><option value="">New conversation</option>{conversations.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select><button onClick={() => { setConversationId(null); setMessages([]); setProposal(null); setError(""); }}>New</button><button title="Delete selected conversation" disabled={!conversationId} onClick={() => void deleteConversation()}><Trash2 size={12} /></button></div>
     <div className="ai-modes"><button className={mode === "ask" ? "selected" : ""} onClick={() => setMode("ask")}>Ask</button><button className={mode === "edit" ? "selected" : ""} onClick={() => setMode("edit")}>Edit</button><button className={mode === "build" ? "selected" : ""} onClick={() => setMode("build")}>Build</button></div>
-    <div className="ai-context">Context: <code>{activePath}</code>, {selection ? "selected code, and related files" : "related workspace files"}</div>
+    <div className="ai-context">Context: <code>{activePath}</code>, {selection ? "selected code, and related files" : "related workspace files"}{usage && <span> · Today {usage.dailyUsed.toLocaleString()} / {usage.dailyLimit.toLocaleString()} tokens</span>}</div>
+    {indexStatus?.enabled && <div className="ai-context" role="status">{indexStatus.status === "ready" ? `Semantic index: ${indexStatus.fileCount} files, ${indexStatus.chunkCount} code chunks${indexStatus.truncated ? " (workspace index size limit reached)" : ""}` : indexStatus.status === "error" ? "Semantic search is unavailable; keyword context is still active." : "Indexing workspace code for semantic search…"}</div>}
     {available === false && <div className="ai-disabled" role="status">AI is unavailable. Enable `AI_ENABLED` and configure `GEMINI_API_KEY` on the API server.</div>}
     <div className="ai-messages" aria-live="polite">
       {!messages.length && <p className="ai-empty">Ask about your code or switch to Edit to request a proposed change. Changes are reviewed before they enter the shared workspace.</p>}
@@ -158,6 +192,6 @@ export function AiAssistant({ roomId, activePath, selection, open, readFiles, on
       {proposal && selectedProposal && <section className="ai-proposal"><div className="ai-proposal-title">Review {proposal.files.length} file{proposal.files.length === 1 ? "" : "s"}</div><div className="ai-file-tabs">{proposal.files.map((file) => <button className={file.path === proposal.selectedPath ? "selected" : ""} key={file.path} onClick={() => setProposal({ ...proposal, selectedPath: file.path })}>{file.path}{file.base === null ? " · new" : ""}</button>)}</div><div className="ai-diff"><DiffEditor height="240px" language={selectedProposal.path.split(".").pop() || language} theme="vs-dark" original={selectedProposal.base || ""} modified={selectedProposal.content} options={{ readOnly: true, renderSideBySide: true, minimap: { enabled: false }, automaticLayout: true }} /></div><div className="ai-proposal-actions"><button onClick={() => setProposal(null)}>Reject all</button><button className="accept" onClick={() => void accept()}>Accept all changes</button></div></section>}
       {error && <p className="ai-error" role="alert">{error}</p>}
     </div>
-    <form className="ai-compose" onSubmit={(event) => { event.preventDefault(); void submit(); }}><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={4000} placeholder={mode === "ask" ? "Ask about this workspace…" : mode === "edit" ? "Describe the changes you want…" : "Describe what you want to build…"} /><div><span>Code goes to Gemini. Messages save to your account’s workspace history.</span>{busy ? <button type="button" onClick={() => abortRef.current?.abort()}>Cancel</button> : <button type="submit" disabled={!prompt.trim() || available === false}>Send</button>}</div></form>
+    <form className="ai-compose" onSubmit={(event) => { event.preventDefault(); void submit(); }}><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={4000} placeholder={mode === "ask" ? "Ask about this workspace…" : mode === "edit" ? "Describe the changes you want…" : "Describe what you want to build…"} /><div><span>Relevant workspace code goes to Gemini and is indexed for semantic search. Messages save to your account’s history.</span>{busy ? <button type="button" onClick={() => abortRef.current?.abort()}>Cancel</button> : <button type="submit" disabled={!prompt.trim() || available === false || (usage !== null && usage.dailyUsed >= usage.dailyLimit)}>Send</button>}</div></form>
   </aside>;
 }
