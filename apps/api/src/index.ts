@@ -14,6 +14,7 @@ import { findUserForCookieHeader, registerAuthRoutes } from "./auth.js";
 import { persistenceEnabled, prisma } from "./db.js";
 import { loadWorkspaceDocument, saveWorkspaceDocument } from "./workspaceStore.js";
 import { ensureWorkspaceAccess, registerWorkspaceRoutes } from "./workspaceAccess.js";
+import { registerAiRoutes } from "./ai.js";
 
 const port = Number(process.env.PORT || 4000);
 const webOrigin = process.env.WEB_ORIGIN || "http://localhost:5174";
@@ -142,6 +143,8 @@ const io = new Server(app.server, {
   maxHttpBufferSize: 1e6,
   transports: ["websocket", "polling"]
 });
+
+registerAiRoutes(app, async (roomId) => await getRoom(roomId, io));
 
 registerWorkspaceRoutes(app, (roomId, userId) => {
   for (const socket of io.sockets.sockets.values()) {
