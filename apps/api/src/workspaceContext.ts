@@ -1,4 +1,6 @@
 export type ContextText = { toString(): string };
+const sensitiveDirectories = new Set(["node_modules", ".git", "dist", "build", "coverage", ".ssh", ".aws", ".gnupg", ".azure", "secrets", "keys", "certificates"]);
+const binaryExtensions = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".zip", ".gz", ".tar", ".jar", ".class", ".exe", ".dll", ".so", ".woff", ".woff2", ".ttf", ".otf", ".mp4", ".mp3", ".sqlite", ".db"]);
 
 export function selectWorkspaceContext(
   entries: Iterable<[string, ContextText]>,
@@ -11,9 +13,13 @@ export function selectWorkspaceContext(
   const files = [...entries].filter(([name, text]) => {
     const parts = name.toLowerCase().split("/");
     const base = parts.at(-1) || "";
-    return !parts.some((part) => ["node_modules", ".git", "dist", "build", "coverage"].includes(part))
+    const extension = base.includes(".") ? `.${base.split(".").pop()}` : "";
+    return !parts.some((part) => sensitiveDirectories.has(part))
       && !/^\.env(?:\.|$)/i.test(base)
-      && !/(\.pem|\.key|\.p12|\.pfx|credentials|secrets?)(?:$|\.)/i.test(base)
+      && !/^\.(npmrc|pypirc|netrc|dockerconfigjson)$/.test(base)
+      && !/^(id_rsa|id_ed25519|id_ecdsa|id_dsa)(?:\..*)?$/.test(base)
+      && !/(\.pem|\.key|\.p12|\.pfx|\.p8|\.der|\.crt|\.cer|credentials?|secrets?|service-account)(?:$|[._-])/i.test(base)
+      && !binaryExtensions.has(extension)
       && !text.toString().includes("\0");
   }).map(([name, text]) => {
     const source = text.toString();

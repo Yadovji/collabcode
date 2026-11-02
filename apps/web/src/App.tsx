@@ -60,6 +60,7 @@ function Room() {
   const [canManageAccess, setCanManageAccess] = useState(false);
   const [accessError, setAccessError] = useState("");
   const [activeFile, setActiveFile] = useState("src/index.ts");
+  const [editorSelection, setEditorSelection] = useState("");
   const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState("Explorer");
   const [chatOpen, setChatOpen] = useState(false);
@@ -90,6 +91,7 @@ function Room() {
   useEffect(() => {
     if (workspace.filePaths.length && !workspace.filePaths.includes(activeFile)) setActiveFile(workspace.filePaths[0]);
   }, [workspace.filePaths, activeFile]);
+  useEffect(() => setEditorSelection(""), [activeFile]);
 
   const createFile = () => {
     const name = window.prompt("New file path (for example: src/utils.ts)");
@@ -228,7 +230,7 @@ function Room() {
               {previewWarnings.map((warning, index) => <div className="preview-warning" key={`warning-${index}`}>{warning}</div>)}
               {previewErrors.map((error, index) => <div className="preview-error" key={`error-${index}`}>JavaScript: {error}</div>)}
             </div>}
-          </section> : activeText && workspace.synced ? <CollaborativeEditor key={activeFile} path={activeFile} text={activeText} awareness={workspace.awareness} /> : <div className="loading-editor"><div className="loader" />Connecting to shared workspace…</div>}
+          </section> : activeText && workspace.synced ? <CollaborativeEditor key={activeFile} path={activeFile} text={activeText} awareness={workspace.awareness} onSelectionChange={setEditorSelection} /> : <div className="loading-editor"><div className="loader" />Connecting to shared workspace…</div>}
         </div>
         <div className="bottom-panel">
           <div className="panel-tabs"><button className="panel-tab active"><span className="terminal-glyph">&gt;_</span> OUTPUT</button><button className="panel-tab" onClick={() => setChatOpen(!chatOpen)}>COLLABORATION</button><span className="panel-status"><span className="status-green" /> WORKSPACE READY</span></div>
@@ -249,7 +251,7 @@ function Room() {
         <div className="rail-foot"><span><Wifi size={12} /> Live sync on</span><span>Yjs · Socket.IO</span></div>
       </aside>
     </div>
-    {aiMounted && <AiAssistant roomId={roomId} activePath={activeFile} open={aiOpen} readFiles={() => Object.fromEntries([...workspace.files.entries()].map(([path, text]) => [path, text.toString()]))} onClose={() => setAiOpen(false)} />}
+    {aiMounted && <AiAssistant roomId={roomId} activePath={activeFile} selection={editorSelection} open={aiOpen} readFiles={() => Object.fromEntries([...workspace.files.entries()].map(([path, text]) => [path, text.toString()]))} onClose={() => setAiOpen(false)} />}
     <footer className="statusbar"><div><span className="status-green" /> Ready</div><div><span>Room: {roomId}</span><span>UTF-8</span><span>{previewOpen ? "HTML preview" : "TypeScript"}</span><span>Phase 4 prototype</span></div></footer>
   </div>;
 }

@@ -10,8 +10,8 @@ type Proposal = { files: ProposedFile[]; selectedPath: string };
 type Message = { role: "user" | "assistant"; text: string };
 type Conversation = { id: string; title: string };
 
-export function AiAssistant({ roomId, activePath, open, readFiles, onClose }: {
-  roomId: string; activePath: string; open: boolean; readFiles: () => Record<string, string>;
+export function AiAssistant({ roomId, activePath, selection, open, readFiles, onClose }: {
+  roomId: string; activePath: string; selection: string; open: boolean; readFiles: () => Record<string, string>;
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<Mode>("ask");
@@ -83,7 +83,7 @@ export function AiAssistant({ roomId, activePath, open, readFiles, onClose }: {
     try {
       const response = await apiRequest(`/api/workspaces/${encodeURIComponent(roomId)}/ai/stream`, {
         method: "POST", signal: controller.signal,
-        body: JSON.stringify({ prompt: question, mode, path: activePath, conversationId })
+        body: JSON.stringify({ prompt: question, mode, path: activePath, selection, conversationId })
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({})) as { error?: string };
@@ -149,7 +149,7 @@ export function AiAssistant({ roomId, activePath, open, readFiles, onClose }: {
     <header className="ai-header"><div><b>AI Assistant</b><small>Workspace context · Gemini · History saved to your account</small></div><button className="ai-close" onClick={onClose} aria-label="Close AI assistant">×</button></header>
     <div className="ai-history"><select aria-label="Conversation history" value={conversationId || ""} onChange={(event) => void selectConversation(event.target.value)}><option value="">New conversation</option>{conversations.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select><button onClick={() => { setConversationId(null); setMessages([]); setProposal(null); setError(""); }}>New</button><button title="Delete selected conversation" disabled={!conversationId} onClick={() => void deleteConversation()}><Trash2 size={12} /></button></div>
     <div className="ai-modes"><button className={mode === "ask" ? "selected" : ""} onClick={() => setMode("ask")}>Ask</button><button className={mode === "edit" ? "selected" : ""} onClick={() => setMode("edit")}>Edit</button><button className={mode === "build" ? "selected" : ""} onClick={() => setMode("build")}>Build</button></div>
-    <div className="ai-context">Context: <code>{activePath}</code> and related workspace files</div>
+    <div className="ai-context">Context: <code>{activePath}</code>, {selection ? "selected code, and related files" : "related workspace files"}</div>
     {available === false && <div className="ai-disabled" role="status">AI is unavailable. Enable `AI_ENABLED` and configure `GEMINI_API_KEY` on the API server.</div>}
     <div className="ai-messages" aria-live="polite">
       {!messages.length && <p className="ai-empty">Ask about your code or switch to Edit to request a proposed change. Changes are reviewed before they enter the shared workspace.</p>}

@@ -10,6 +10,10 @@ test("workspace context excludes environment, credential, binary, and generated 
     ".env.local": "API_KEY=private",
     "keys/signing.pem": "private key",
     "config/credentials.json": "token",
+    ".ssh/id_ed25519": "private key",
+    "secrets/notes.txt": "secret",
+    ".npmrc": "token",
+    "assets/logo.png": "binary without a null byte",
     "dist/app.js": "built",
     "assets/blob.dat": "\0binary"
   }), "explain app", "src/app.ts", "")) as { files: Array<{ name: string }> };
