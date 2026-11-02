@@ -16,6 +16,7 @@ import { loadWorkspaceDocument, saveWorkspaceDocument } from "./workspaceStore.j
 import { ensureWorkspaceAccess, getWorkspaceRole, registerWorkspaceRoutes } from "./workspaceAccess.js";
 import { registerAiRoutes } from "./ai.js";
 import { registerCollaborationRoutes } from "./collaboration.js";
+import { registerCodeExecutionRoutes } from "./codeExecution.js";
 import { scheduleWorkspaceIndex } from "./workspaceIndex.js";
 
 const port = Number(process.env.PORT || 4000);
@@ -266,6 +267,7 @@ registerAuthRoutes(app, (userId, sessionId) => {
 
 registerAiRoutes(app, async (roomId) => await getRoom(roomId, io));
 registerCollaborationRoutes(app, async (roomId) => await getRoom(roomId, io));
+registerCodeExecutionRoutes(app, async (roomId) => await getRoom(roomId, io));
 
 registerWorkspaceRoutes(app, (roomId, userId) => {
   for (const socket of io.sockets.sockets.values()) {

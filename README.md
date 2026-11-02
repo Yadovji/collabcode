@@ -1,6 +1,6 @@
 # CollabCode — Collaborative coding workspace
 
-CollabCode is a browser-based shared coding workspace. It includes account registration and login, PostgreSQL-backed sessions, owner/editor/viewer access, real-time editing with Monaco and Yjs/Socket.IO, durable workspace review threads and line-range activity, a sandboxed preview for simple multi-file websites, and an optional Gemini coding assistant for workspace-aware questions and reviewed multi-file edits.
+CollabCode is a browser-based shared coding workspace. It includes account registration and login, PostgreSQL-backed sessions, owner/editor/viewer access, real-time editing with Monaco and Yjs/Socket.IO, durable workspace review threads and line-range activity, a sandboxed preview for simple multi-file websites, an optional local-only Docker runner for Python and Java, and an optional Gemini coding assistant for workspace-aware questions and reviewed multi-file edits.
 
 ## Run locally
 
@@ -55,7 +55,27 @@ The committed `.devcontainer/devcontainer.json` works with GitHub Codespaces and
 
 In a room, choose **Run preview**. The app uses `index.html` (or `src/index.html`) as the entry file, then resolves its linked workspace CSS, classic JavaScript, and text assets such as SVG files. If the room does not have an HTML entry file yet, choose **Create a sample website** to add `index.html`, `styles.css`, and `script.js` together. Those files are shared and edited just like the existing TypeScript files; each collaborator can run the current shared version in their own preview.
 
-The preview runs inside a browser iframe with scripts enabled but same-origin access disabled. The API server never executes the preview code. This first version is for plain HTML, CSS, and JavaScript; it does not install packages or build React/Vite, resolve JavaScript module imports, run TypeScript, or execute Python/Java. Those need a separate build pipeline or restricted execution service.
+The preview runs inside a browser iframe with scripts enabled but same-origin access disabled. The API server never executes the website preview code. This first version is for plain HTML, CSS, and JavaScript; it does not install packages or build React/Vite, resolve JavaScript module imports, or run TypeScript.
+
+### Run a Python or Java file locally (optional)
+
+This is a small local development runner, not a hosted feature or a production security boundary. It runs one `.py` or one single-file `.java` program in Docker. The container has no network, no access to project folders or host files, read-only root filesystem, 0.5 CPU, 384 MB memory, a 15-second time limit, and a 16 KB combined output limit. Python's and Java's standard libraries are available. `pip`, Maven, Gradle, multi-file projects, and package downloads are not supported. Only signed-in workspace owners and editors can run code; viewers cannot. The API additionally accepts execution requests only from loopback on the same computer, and refuses execution in production mode.
+
+To enable this optional feature on the computer running the local API:
+
+1. Keep Docker Desktop running.
+2. Open the root `.env` file and change `CODE_EXECUTION_ENABLED=false` to `CODE_EXECUTION_ENABLED=true`.
+3. In PowerShell, download the two runner images once:
+
+   ```powershell
+   docker pull python:3.12-alpine
+   docker pull eclipse-temurin:21-jdk-alpine
+   ```
+
+4. Stop the running development server with **Ctrl+C**, then run `npm.cmd run dev` again from the project folder.
+5. In a room, create or open a `.py` or `.java` file and choose **Run Python** or **Run Java**. The output appears in the bottom panel.
+
+The runner is disabled by default and stays disabled on Render. It needs Docker Desktop on the same computer as the local API. It does not make Python or Java execution available to collaborators using the hosted site. Use it only with code from people you trust: containers reduce risk but are not a formally audited hostile-code sandbox. To turn it back off, set the variable to `false` and restart the development server. Website **Run preview** remains separate and continues to work without this runner.
 
 ### Verify account access
 
@@ -134,7 +154,7 @@ Deployment is prepared for a GitHub repository, a hosted PostgreSQL database, an
 - Registration, login, invitations, and member removal are limited per client IP using in-memory counters. Keep one API instance; limits reset on restart and are not shared across instances.
 - PostgreSQL persists workspace documents and membership, while active collaboration and presence are managed by one API process. Multiple API instances do not share room state yet.
 - Redis is present in Compose as an optional service, but is not wired into the application yet.
-- There is no terminal, npm build pipeline, or general-purpose language runner. Website preview currently supports plain HTML, CSS, and classic JavaScript in an isolated browser frame.
+- Website preview supports plain HTML, CSS, and classic JavaScript in an isolated browser frame. The optional Python/Java runner is local-only, single-file, and uses standard libraries; there is no workspace terminal, npm build pipeline, third-party package installation, or hosted code execution.
 - Do not use this prototype for confidential code or as a public production service. Add email verification, account recovery, a shared rate-limit store, request/update quotas, and an isolated execution service before opening it to untrusted users.
 
 ## Next phases

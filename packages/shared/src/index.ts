@@ -32,7 +32,7 @@ export function getLanguageForPath(path: string): string {
   const extension = path.split(".").pop()?.toLowerCase();
   const languages: Record<string, string> = {
     ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
-    json: "json", md: "markdown", css: "css", html: "html", py: "python",
+    json: "json", md: "markdown", css: "css", html: "html", py: "python", java: "java",
     yml: "yaml", yaml: "yaml", sql: "sql"
   };
   return (extension && languages[extension]) || "plaintext";

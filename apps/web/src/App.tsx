@@ -14,6 +14,18 @@ function makeRoomId() {
   return `room-${crypto.randomUUID().slice(0, 8)}`;
 }
 
+type CodeExecutionState = {
+  language: "Python" | "Java";
+  running: boolean;
+  stdout?: string;
+  stderr?: string;
+  exitCode?: number | null;
+  durationMs?: number;
+  timedOut?: boolean;
+  outputTruncated?: boolean;
+  error?: string;
+};
+
 function Home() {
   const navigate = useNavigate();
   const { user, logout, logoutEverywhere } = useAuth();
@@ -79,6 +91,8 @@ function Room() {
   const [previewWarnings, setPreviewWarnings] = useState<string[]>([]);
   const [previewErrors, setPreviewErrors] = useState<string[]>([]);
   const [previewRunId, setPreviewRunId] = useState(0);
+  const [codeExecutionEnabled, setCodeExecutionEnabled] = useState(false);
+  const [codeExecution, setCodeExecution] = useState<CodeExecutionState | null>(null);
   const previewFrameRef = useRef<HTMLIFrameElement>(null);
   const previewNeedsStarter = previewWarnings.some((warning) => warning.startsWith("Add index.html"));
   const refreshAccess = useCallback(async () => {
@@ -98,9 +112,17 @@ function Room() {
   // initial document sync before asking the access endpoint for its members.
   useEffect(() => { if (workspace.synced) void refreshAccess(); }, [workspace.synced, refreshAccess]);
   useEffect(() => {
+    let cancelled = false;
+    void apiRequest("/api/code-execution/status")
+      .then(async (response) => response.ok ? await response.json() as { enabled?: boolean } : { enabled: false })
+      .then((result) => { if (!cancelled) setCodeExecutionEnabled(Boolean(result.enabled)); })
+      .catch(() => { if (!cancelled) setCodeExecutionEnabled(false); });
+    return () => { cancelled = true; };
+  }, []);
+  useEffect(() => {
     if (workspace.filePaths.length && !workspace.filePaths.includes(activeFile)) setActiveFile(workspace.filePaths[0]);
   }, [workspace.filePaths, activeFile]);
-  useEffect(() => { setEditorSelection(""); setReviewSelection(null); }, [activeFile]);
+  useEffect(() => { setEditorSelection(""); setReviewSelection(null); setCodeExecution(null); }, [activeFile]);
 
   const createFile = () => {
     if (currentRole === "viewer") return;
@@ -159,6 +181,7 @@ function Room() {
     }
   };
   const activeText = workspace.files.get(activeFile);
+  const codeLanguage = activeFile.toLowerCase().endsWith(".py") ? "Python" : activeFile.toLowerCase().endsWith(".java") ? "Java" : null;
 
   const runWebsitePreview = () => {
     const snapshot = Object.create(null) as Record<string, string>;
@@ -169,6 +192,25 @@ function Room() {
     setPreviewErrors([]);
     setPreviewRunId((current) => current + 1);
     setPreviewOpen(true);
+  };
+
+  const runWorkspaceCode = async () => {
+    if (!codeLanguage || !codeExecutionEnabled || currentRole === "viewer" || !workspace.synced || codeExecution?.running) return;
+    setCodeExecution({ language: codeLanguage, running: true });
+    setChatOpen(false);
+    try {
+      const response = await apiRequest(`/api/workspaces/${encodeURIComponent(roomId)}/execute`, {
+        method: "POST", body: JSON.stringify({ filePath: activeFile })
+      });
+      const result = await response.json().catch(() => ({})) as {
+        stdout?: string; stderr?: string; exitCode?: number | null; durationMs?: number;
+        timedOut?: boolean; outputTruncated?: boolean; error?: string;
+      };
+      if (!response.ok) throw new Error(result.error || "Could not run this file.");
+      setCodeExecution({ language: codeLanguage, running: false, ...result });
+    } catch (error) {
+      setCodeExecution({ language: codeLanguage, running: false, error: error instanceof Error ? error.message : "Could not run this file." });
+    }
   };
 
   const createWebsiteStarter = () => {
@@ -243,7 +285,7 @@ function Room() {
       </aside>
 
       <main className="editor-area">
-        <div className="editor-tabs"><div className="editor-tab"><span className="tab-file-icon">{activeFile.endsWith(".ts") ? "TS" : activeFile.endsWith(".json") ? "{}" : "M"}</span>{activeFile}<span className="tab-dot" /></div><div className="editor-tab-actions"><span className="saving-indicator"><span /> All changes synced</span><button className="preview-run-button" onClick={() => { setAiMounted(true); setAiOpen((open) => !open); }} title="Open AI assistant"><Sparkles size={12} /> AI</button><button className="preview-run-button" onClick={runWebsitePreview} disabled={!workspace.synced} title="Run the shared HTML website in a sandboxed preview"><Play size={12} /> Run preview</button><button className="icon-button" title="Open collaboration panel" onClick={() => { setTab("Collaboration"); setChatOpen(!chatOpen); }}><Users size={15} /></button></div></div>
+        <div className="editor-tabs"><div className="editor-tab"><span className="tab-file-icon">{activeFile.endsWith(".ts") ? "TS" : activeFile.endsWith(".json") ? "{}" : activeFile.endsWith(".py") ? "PY" : activeFile.endsWith(".java") ? "JV" : "M"}</span>{activeFile}<span className="tab-dot" /></div><div className="editor-tab-actions"><span className="saving-indicator"><span /> All changes synced</span><button className="preview-run-button" onClick={() => { setAiMounted(true); setAiOpen((open) => !open); }} title="Open AI assistant"><Sparkles size={12} /> AI</button>{codeLanguage ? <button className="preview-run-button" onClick={() => void runWorkspaceCode()} disabled={!codeExecutionEnabled || !workspace.synced || currentRole === "viewer" || Boolean(codeExecution?.running)} title={codeExecutionEnabled ? `Run this ${codeLanguage} file in a restricted local Docker container` : "Local Docker runner is off or unavailable on hosted deployments. Enable CODE_EXECUTION_ENABLED=true in your local .env and restart."}><Play size={12} /> {codeExecution?.running ? "Running…" : codeExecutionEnabled ? `Run ${codeLanguage}` : `${codeLanguage} off`}</button> : <button className="preview-run-button" onClick={runWebsitePreview} disabled={!workspace.synced} title="Run the shared HTML website in a sandboxed preview"><Play size={12} /> Run preview</button>}<button className="icon-button" title="Open collaboration panel" onClick={() => { setTab("Collaboration"); setChatOpen(!chatOpen); }}><Users size={15} /></button></div></div>
         <div className="editor-breadcrumb"><span>workspace</span><span>/</span><b>{activeFile}</b></div>
         <div className="monaco-wrap">
           {previewOpen ? <section className="website-preview">
@@ -257,7 +299,7 @@ function Room() {
         </div>
         <div className="bottom-panel">
           <div className="panel-tabs"><button className="panel-tab active"><span className="terminal-glyph">&gt;_</span> OUTPUT</button><button className="panel-tab" onClick={() => setChatOpen(!chatOpen)}>COLLABORATION</button><span className="panel-status"><span className="status-green" /> WORKSPACE READY</span></div>
-          {chatOpen ? <div className="panel-content"><div className="panel-message"><Sparkles size={15} /><span>Live editing is on. Only invited accounts can open this room.</span></div>{canManageAccess ? <button className="panel-action" onClick={inviteMember}>Invite a teammate <ArrowRight size={13} /></button> : <div className="terminal-hint">Only the workspace owner can invite teammates.</div>}</div> : <div className="panel-content"><div className="terminal-line"><span className="terminal-prompt">›</span><span>{previewOpen ? "Website preview is isolated in a browser sandbox." : "CollabCode Phase 5 ready"}</span></div><div className="terminal-hint">{previewOpen ? "Edits sync live. Press Run preview again to refresh the page." : "Use Run preview for a shared HTML, CSS, and JavaScript website. Server-side code execution is not enabled."}</div></div>}
+          {chatOpen ? <div className="panel-content"><div className="panel-message"><Sparkles size={15} /><span>Live editing is on. Only invited accounts can open this room.</span></div>{canManageAccess ? <button className="panel-action" onClick={inviteMember}>Invite a teammate <ArrowRight size={13} /></button> : <div className="terminal-hint">Only the workspace owner can invite teammates.</div>}</div> : codeExecution ? <div className="panel-content code-run-panel"><div className="terminal-line"><span className={codeExecution.running ? "terminal-prompt" : codeExecution.error || codeExecution.timedOut || (codeExecution.exitCode !== undefined && codeExecution.exitCode !== 0) ? "code-run-failed" : "status-green"}>{codeExecution.running ? "›" : codeExecution.error || codeExecution.timedOut || (codeExecution.exitCode !== undefined && codeExecution.exitCode !== 0) ? "!" : "✓"}</span><span>{codeExecution.running ? `Running ${codeExecution.language} in the local Docker sandbox…` : codeExecution.error || codeExecution.timedOut ? `${codeExecution.language} run stopped: ${codeExecution.timedOut ? "time limit reached" : codeExecution.error}` : `${codeExecution.language} finished with exit code ${codeExecution.exitCode ?? "unknown"} in ${codeExecution.durationMs ?? 0} ms`}</span></div>{!codeExecution.running && <><pre className="code-execution-output">{[codeExecution.stdout, codeExecution.stderr ? `STDERR:\n${codeExecution.stderr}` : "", codeExecution.outputTruncated ? "[Output truncated at 16 KB.]" : ""].filter(Boolean).join("\n") || "Program finished without output."}</pre><div className="terminal-hint">Runs locally in Docker · no network · Python standard library / Java standard library only</div></>}</div> : <div className="panel-content"><div className="terminal-line"><span className="terminal-prompt">›</span><span>{previewOpen ? "Website preview is isolated in a browser sandbox." : "CollabCode Phase 5 ready"}</span></div><div className="terminal-hint">{previewOpen ? "Edits sync live. Press Run preview again to refresh the page." : codeLanguage ? codeExecutionEnabled ? "Runs the current shared file on the local API machine. Third-party packages are not installed." : "Python/Java runner is off or unavailable on hosted deployments. To enable it locally, set CODE_EXECUTION_ENABLED=true in .env, then restart the API." : "Use Run preview for a shared HTML, CSS, and JavaScript website. Server-side code execution is not enabled."}</div></div>}
         </div>
       </main>
       <aside className="right-rail">
