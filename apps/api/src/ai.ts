@@ -199,7 +199,8 @@ export function registerAiRoutes(app: FastifyInstance, getRoom: RoomLookup) {
     reply.raw.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
     const abort = new AbortController();
     let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; abort.abort(); }, 60_000);
+    const requestTimeoutMs = mode === "build" ? 120_000 : 60_000;
+    const timer = setTimeout(() => { timedOut = true; abort.abort(); }, requestTimeoutMs);
     reply.raw.on("close", () => { if (!reply.raw.writableEnded) abort.abort(); });
     const send = (type: string, data: unknown) => { if (!reply.raw.destroyed) reply.raw.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`); };
     send("conversation", { id: conversation.id });
@@ -207,7 +208,7 @@ export function registerAiRoutes(app: FastifyInstance, getRoom: RoomLookup) {
     let interactionCompleted = false;
     let failureSent = false;
     try {
-      const stream = await ai.interactions.create({ model, system_instruction: system, input, generation_config: { max_output_tokens: Math.min(8192, dailyTokenLimit - dailyUsed), temperature: 0.2 }, stream: true, store: false }, { timeout_ms: 60_000, fetchOptions: { signal: abort.signal } });
+      const stream = await ai.interactions.create({ model, system_instruction: system, input, generation_config: { max_output_tokens: Math.min(8192, dailyTokenLimit - dailyUsed), temperature: 0.2 }, stream: true, store: false }, { timeout_ms: requestTimeoutMs, fetchOptions: { signal: abort.signal } });
       for await (const event of stream) {
         if (abort.signal.aborted) break;
         if (event.event_type === "step.delta" && event.delta.type === "text") { answer += event.delta.text; send("token", { text: event.delta.text }); }
@@ -252,7 +253,7 @@ export function registerAiRoutes(app: FastifyInstance, getRoom: RoomLookup) {
       }
     } catch (error) {
       const failure = timedOut
-        ? { status: undefined, code: "request_timeout", message: "Gemini did not respond within 60 seconds. It may be overloaded; retry later or try GEMINI_MODEL=gemini-2.5-flash." }
+        ? { status: undefined, code: "request_timeout", message: `Gemini did not complete this ${mode} request within ${requestTimeoutMs / 1000} seconds. Try a shorter request and try again.` }
         : describeProviderFailure(error);
       request.log.warn({ providerStatus: failure.status, providerErrorCode: failure.code, timedOut }, "AI provider request failed");
       if (!reply.raw.destroyed) send("error", { message: failure.message });
