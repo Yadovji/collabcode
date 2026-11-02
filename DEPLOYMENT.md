@@ -23,6 +23,7 @@ Use one Render **Web Service** for both the API and website. Serving both from o
 | `AI_ENABLED` | Set `true` to enable the optional Ask/Edit assistant; defaults to `false` |
 | `GEMINI_API_KEY` | Private Google Gemini Developer API key, set only on the API service |
 | `GEMINI_MODEL` | Optional model ID; defaults to `gemini-3.8-flash` |
+| `GEMINI_COMPLEX_MODEL` | Optional model for Build planning; defaults to `gemini-3.1-pro-preview` |
 | `PORT` | Leave unset; Render supplies it |
 
 Build command:

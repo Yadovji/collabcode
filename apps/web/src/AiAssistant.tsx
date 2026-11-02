@@ -4,7 +4,7 @@ import { Trash2 } from "lucide-react";
 import { apiRequest } from "./auth";
 import { isSafeFilePath } from "@collab/shared";
 
-type Mode = "ask" | "edit";
+type Mode = "ask" | "edit" | "build";
 type ProposedFile = { path: string; content: string; base: string | null };
 type Proposal = { files: ProposedFile[]; selectedPath: string };
 type Message = { role: "user" | "assistant"; text: string };
@@ -20,6 +20,7 @@ export function AiAssistant({ roomId, activePath, open, readFiles, onClose }: {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [proposal, setProposal] = useState<Proposal | null>(null);
+  const [plan, setPlan] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [available, setAvailable] = useState<boolean | null>(null);
@@ -76,7 +77,7 @@ export function AiAssistant({ roomId, activePath, open, readFiles, onClose }: {
     const question = prompt.trim();
     if (!question || busy) return;
     const snapshotAtRequest = readFiles();
-    setPrompt(""); setError(""); setProposal(null); setBusy(true);
+    setPrompt(""); setError(""); setProposal(null); setPlan([]); setBusy(true);
     setMessages((items) => [...items, { role: "user", text: question }, { role: "assistant", text: "" }]);
     const controller = new AbortController(); abortRef.current = controller;
     try {
@@ -110,11 +111,12 @@ export function AiAssistant({ roomId, activePath, open, readFiles, onClose }: {
           if (event === "error") throw new Error(data.message || "AI request failed.");
         }
       }
-      if (mode === "edit") {
+      if (mode === "edit" || mode === "build") {
         const match = answer.match(/```(?:json)?\s*([\s\S]*?)```/i);
         try {
-          const parsed = match ? JSON.parse(match[1]) as { files?: unknown } : null;
-          if (!parsed || !Array.isArray(parsed.files) || parsed.files.length < 1 || parsed.files.length > 8) throw new Error("The model did not return a valid changeset. Ask it to try again.");
+          const parsed = match ? JSON.parse(match[1]) as { files?: unknown; plan?: unknown } : null;
+          if (!parsed || !Array.isArray(parsed.files) || parsed.files.length > 8 || (mode === "edit" && parsed.files.length < 1)) throw new Error("The model did not return a valid changeset. Ask it to try again.");
+          if (mode === "build" && Array.isArray(parsed.plan)) setPlan(parsed.plan.filter((step): step is string => typeof step === "string").slice(0, 12));
           const seen = new Set<string>();
           const files = parsed.files.map((value): ProposedFile => {
             if (typeof value !== "object" || value === null) throw new Error("The model returned an invalid file proposal.");
@@ -123,7 +125,7 @@ export function AiAssistant({ roomId, activePath, open, readFiles, onClose }: {
             seen.add(item.path);
             return { path: item.path, content: item.content, base: Object.hasOwn(snapshotAtRequest, item.path) ? snapshotAtRequest[item.path] : null };
           });
-          setProposal({ files, selectedPath: files[0].path });
+          if (files.length) setProposal({ files, selectedPath: files[0].path });
         } catch (err) { setError(err instanceof Error ? err.message : "Could not parse the proposed changes."); }
       }
     } catch (err) {
@@ -146,15 +148,16 @@ export function AiAssistant({ roomId, activePath, open, readFiles, onClose }: {
   return <aside className="ai-panel" aria-label="AI coding assistant" hidden={!open}>
     <header className="ai-header"><div><b>AI Assistant</b><small>Workspace context · Gemini · History saved to your account</small></div><button className="ai-close" onClick={onClose} aria-label="Close AI assistant">×</button></header>
     <div className="ai-history"><select aria-label="Conversation history" value={conversationId || ""} onChange={(event) => void selectConversation(event.target.value)}><option value="">New conversation</option>{conversations.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select><button onClick={() => { setConversationId(null); setMessages([]); setProposal(null); setError(""); }}>New</button><button title="Delete selected conversation" disabled={!conversationId} onClick={() => void deleteConversation()}><Trash2 size={12} /></button></div>
-    <div className="ai-modes"><button className={mode === "ask" ? "selected" : ""} onClick={() => setMode("ask")}>Ask</button><button className={mode === "edit" ? "selected" : ""} onClick={() => setMode("edit")}>Edit</button></div>
+    <div className="ai-modes"><button className={mode === "ask" ? "selected" : ""} onClick={() => setMode("ask")}>Ask</button><button className={mode === "edit" ? "selected" : ""} onClick={() => setMode("edit")}>Edit</button><button className={mode === "build" ? "selected" : ""} onClick={() => setMode("build")}>Build</button></div>
     <div className="ai-context">Context: <code>{activePath}</code> and related workspace files</div>
     {available === false && <div className="ai-disabled" role="status">AI is unavailable. Enable `AI_ENABLED` and configure `GEMINI_API_KEY` on the API server.</div>}
     <div className="ai-messages" aria-live="polite">
       {!messages.length && <p className="ai-empty">Ask about your code or switch to Edit to request a proposed change. Changes are reviewed before they enter the shared workspace.</p>}
       {messages.map((message, index) => <article className={`ai-message ${message.role}`} key={index}><b>{message.role === "user" ? "You" : "Gemini"}</b><pre>{message.text || (busy ? "Thinking…" : "")}</pre></article>)}
+      {plan.length > 0 && <section className="ai-plan"><b>Implementation plan</b><ol>{plan.map((step, index) => <li key={index}>{step}</li>)}</ol><small>Review and accept the proposed files below to apply the code changes.</small></section>}
       {proposal && selectedProposal && <section className="ai-proposal"><div className="ai-proposal-title">Review {proposal.files.length} file{proposal.files.length === 1 ? "" : "s"}</div><div className="ai-file-tabs">{proposal.files.map((file) => <button className={file.path === proposal.selectedPath ? "selected" : ""} key={file.path} onClick={() => setProposal({ ...proposal, selectedPath: file.path })}>{file.path}{file.base === null ? " · new" : ""}</button>)}</div><div className="ai-diff"><DiffEditor height="240px" language={selectedProposal.path.split(".").pop() || language} theme="vs-dark" original={selectedProposal.base || ""} modified={selectedProposal.content} options={{ readOnly: true, renderSideBySide: true, minimap: { enabled: false }, automaticLayout: true }} /></div><div className="ai-proposal-actions"><button onClick={() => setProposal(null)}>Reject all</button><button className="accept" onClick={() => void accept()}>Accept all changes</button></div></section>}
       {error && <p className="ai-error" role="alert">{error}</p>}
     </div>
-    <form className="ai-compose" onSubmit={(event) => { event.preventDefault(); void submit(); }}><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={4000} placeholder={mode === "ask" ? "Ask about this workspace…" : "Describe the change you want…"} /><div><span>Code goes to Gemini. Messages save to your account’s workspace history.</span>{busy ? <button type="button" onClick={() => abortRef.current?.abort()}>Cancel</button> : <button type="submit" disabled={!prompt.trim() || available === false}>Send</button>}</div></form>
+    <form className="ai-compose" onSubmit={(event) => { event.preventDefault(); void submit(); }}><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={4000} placeholder={mode === "ask" ? "Ask about this workspace…" : mode === "edit" ? "Describe the changes you want…" : "Describe what you want to build…"} /><div><span>Code goes to Gemini. Messages save to your account’s workspace history.</span>{busy ? <button type="button" onClick={() => abortRef.current?.abort()}>Cancel</button> : <button type="submit" disabled={!prompt.trim() || available === false}>Send</button>}</div></form>
   </aside>;
 }
