@@ -7,6 +7,7 @@ import { apiRequest, useAuth } from "./auth";
 import { useWorkspace } from "./useWorkspace";
 import { CollaborativeEditor } from "./CollaborativeEditor";
 import { buildWebsitePreview, WEBSITE_STARTER_FILES } from "./websitePreview";
+import { AiAssistant } from "./AiAssistant";
 
 function makeRoomId() {
   return `room-${crypto.randomUUID().slice(0, 8)}`;
@@ -63,6 +64,7 @@ function Room() {
   const [tab, setTab] = useState("Explorer");
   const [chatOpen, setChatOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [previewWarnings, setPreviewWarnings] = useState<string[]>([]);
   const [previewErrors, setPreviewErrors] = useState<string[]>([]);
@@ -133,6 +135,18 @@ function Room() {
     }
   };
   const activeText = workspace.files.get(activeFile);
+  const applyAiFile = (path: string, base: string, content: string) => {
+    const existing = workspace.files.get(path);
+    if (existing) {
+      if (existing.toString() !== base) return false;
+      workspace.doc.transact(() => { existing.delete(0, existing.length); if (content) existing.insert(0, content); });
+      return true;
+    }
+    if (base || !isSafeFilePath(path)) return false;
+    workspace.createFile(path, content);
+    setActiveFile(path);
+    return true;
+  };
 
   const runWebsitePreview = () => {
     const snapshot = Object.create(null) as Record<string, string>;
@@ -215,7 +229,7 @@ function Room() {
       </aside>
 
       <main className="editor-area">
-        <div className="editor-tabs"><div className="editor-tab"><span className="tab-file-icon">{activeFile.endsWith(".ts") ? "TS" : activeFile.endsWith(".json") ? "{}" : "M"}</span>{activeFile}<span className="tab-dot" /></div><div className="editor-tab-actions"><span className="saving-indicator"><span /> All changes synced</span><button className="preview-run-button" onClick={runWebsitePreview} disabled={!workspace.synced} title="Run the shared HTML website in a sandboxed preview"><Play size={12} /> Run preview</button><button className="icon-button" title="Open collaboration panel" onClick={() => { setTab("Collaboration"); setChatOpen(!chatOpen); }}><Users size={15} /></button></div></div>
+        <div className="editor-tabs"><div className="editor-tab"><span className="tab-file-icon">{activeFile.endsWith(".ts") ? "TS" : activeFile.endsWith(".json") ? "{}" : "M"}</span>{activeFile}<span className="tab-dot" /></div><div className="editor-tab-actions"><span className="saving-indicator"><span /> All changes synced</span><button className="preview-run-button" onClick={() => setAiOpen((open) => !open)} title="Open AI assistant"><Sparkles size={12} /> AI</button><button className="preview-run-button" onClick={runWebsitePreview} disabled={!workspace.synced} title="Run the shared HTML website in a sandboxed preview"><Play size={12} /> Run preview</button><button className="icon-button" title="Open collaboration panel" onClick={() => { setTab("Collaboration"); setChatOpen(!chatOpen); }}><Users size={15} /></button></div></div>
         <div className="editor-breadcrumb"><span>workspace</span><span>/</span><b>{activeFile}</b></div>
         <div className="monaco-wrap">
           {previewOpen ? <section className="website-preview">
@@ -246,6 +260,7 @@ function Room() {
         <div className="rail-foot"><span><Wifi size={12} /> Live sync on</span><span>Yjs · Socket.IO</span></div>
       </aside>
     </div>
+    <AiAssistant roomId={roomId} activePath={activeFile} open={aiOpen} readFile={(path) => workspace.files.get(path)?.toString()} applyFile={applyAiFile} onClose={() => setAiOpen(false)} />
     <footer className="statusbar"><div><span className="status-green" /> Ready</div><div><span>Room: {roomId}</span><span>UTF-8</span><span>{previewOpen ? "HTML preview" : "TypeScript"}</span><span>Phase 4 prototype</span></div></footer>
   </div>;
 }

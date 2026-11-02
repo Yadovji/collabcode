@@ -1,6 +1,6 @@
-# CollabCode — Phase 4
+# CollabCode — Phase 4 + optional AI assistant
 
-CollabCode is a browser-based shared coding workspace. Phase 4 includes account registration and login, PostgreSQL-backed sessions, workspace ownership and membership, real-time editing with Monaco and Yjs/Socket.IO, plus a sandboxed preview for simple multi-file websites.
+CollabCode is a browser-based shared coding workspace. It includes account registration and login, PostgreSQL-backed sessions, workspace ownership and membership, real-time editing with Monaco and Yjs/Socket.IO, a sandboxed preview for simple multi-file websites, and an optional Gemini coding assistant for workspace-aware questions and reviewed single-file edits.
 
 ## Run locally
 
@@ -107,16 +107,20 @@ Deployment is prepared for a GitHub repository, a hosted PostgreSQL database, an
 
 ## Current scope and limitations
 
+- The optional AI panel supports streaming Ask and Edit. Edit proposals are shown in a Monaco diff and require explicit acceptance; accepted edits flow through Yjs. It is disabled unless `AI_ENABLED=true` and `GEMINI_API_KEY` is configured. The key stays on the API server.
+- AI context is assembled from a bounded set of workspace files with basic keyword ranking and filters for environment files, common credential files, build output, and binary content. This is not a persistent vector index/RAG implementation. Conversation history is held in the panel session and is not stored in PostgreSQL.
+- AI edits currently propose one active file at a time. Build mode, agent tool execution, dependency installation, isolated Docker execution, usage accounting, and undo history are not implemented. The assistant never runs workspace code on the API.
+
 - Accounts use email and password, with passwords stored as scrypt hashes and sessions in PostgreSQL. Workspace owners can add existing accounts as members; server-side room joins require ownership or membership.
 - Invitations currently require the teammate to register first. Owners can remove invited members, which closes their active socket connection. Email verification, password reset, and account recovery are not implemented.
 - Registration, login, invitations, and member removal are limited per client IP using in-memory counters. Keep one API instance; limits reset on restart and are not shared across instances.
 - PostgreSQL persists workspace documents and membership, while active collaboration and presence are managed by one API process. Multiple API instances do not share room state yet.
 - Redis is present in Compose as an optional service, but is not wired into the application yet.
-- There is no AI provider integration, terminal, npm build pipeline, or general-purpose language runner. Website preview currently supports plain HTML, CSS, and classic JavaScript in an isolated browser frame.
+- There is no terminal, npm build pipeline, or general-purpose language runner. Website preview currently supports plain HTML, CSS, and classic JavaScript in an isolated browser frame.
 - Do not use this prototype for confidential code or as a public production service. Add email verification, account recovery, a shared rate-limit store, request/update quotas, and an isolated execution service before opening it to untrusted users.
 
 ## Next phases
 
 1. Workspace version history and multi-instance collaboration support.
-2. AI change proposals with review/apply controls.
+2. Persistent AI conversations, structured multi-file proposals, and usage controls.
 3. Isolated execution workers and restricted previews.

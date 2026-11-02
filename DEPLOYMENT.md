@@ -20,6 +20,9 @@ Use one Render **Web Service** for both the API and website. Serving both from o
 | `TRUST_PROXY` | `1` (Render's trusted reverse-proxy hop; required for per-client IP rate limits) |
 | `WEB_ORIGIN` | This Web Service's exact public origin, e.g. `https://your-api.onrender.com` |
 | `DATABASE_URL` | PostgreSQL connection string for a persistent hosted database |
+| `AI_ENABLED` | Set `true` to enable the optional Ask/Edit assistant; defaults to `false` |
+| `GEMINI_API_KEY` | Private Google Gemini Developer API key, set only on the API service |
+| `GEMINI_MODEL` | Optional model ID; defaults to `gemini-3.8-flash` |
 | `PORT` | Leave unset; Render supplies it |
 
 Build command:
