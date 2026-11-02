@@ -12,6 +12,7 @@ type AuthContextValue = {
   login: (credentials: Credentials) => Promise<void>;
   register: (details: Registration) => Promise<void>;
   logout: () => Promise<void>;
+  logoutEverywhere: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -57,6 +58,14 @@ function AuthProvider({ children }: { children: ReactNode }) {
     },
     async logout() {
       await apiRequest("/api/auth/logout", { method: "POST" });
+      setUser(null);
+    },
+    async logoutEverywhere() {
+      const response = await apiRequest("/api/auth/logout-all", { method: "POST" });
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(result.error || "Could not revoke your sign-in sessions.");
+      }
       setUser(null);
     }
   }), [user, loading]);

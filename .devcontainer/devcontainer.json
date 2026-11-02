@@ -1,0 +1,18 @@
+{
+  "name": "CollabCode development",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "workspace",
+  "workspaceFolder": "/workspaces/collab-code-platform",
+  "shutdownAction": "stopCompose",
+  "forwardPorts": [5173, 4000],
+  "portsAttributes": {
+    "5173": { "label": "CollabCode web app", "onAutoForward": "openBrowser" },
+    "4000": { "label": "CollabCode API" }
+  },
+  "postCreateCommand": "npm ci && npm run db:migrate",
+  "customizations": {
+    "vscode": {
+      "extensions": ["Prisma.prisma"]
+    }
+  }
+}

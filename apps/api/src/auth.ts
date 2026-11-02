@@ -107,7 +107,7 @@ function databaseRequired(reply: FastifyReply): boolean {
   return false;
 }
 
-export function registerAuthRoutes(app: FastifyInstance) {
+export function registerAuthRoutes(app: FastifyInstance, revokeLiveSessions: (userId: string, sessionId?: string) => void = () => undefined) {
   app.post("/api/auth/register", { config: { rateLimit: { max: 10, timeWindow: "1 hour" } } }, async (request, reply) => {
     if (!databaseRequired(reply)) return;
     const body = bodyObject(request.body);
@@ -158,7 +158,22 @@ export function registerAuthRoutes(app: FastifyInstance) {
   app.post("/api/auth/logout", async (request, reply) => {
     if (!databaseRequired(reply)) return;
     const token = sessionTokenFromCookieHeader(request.headers.cookie);
-    if (token) await prisma!.session.deleteMany({ where: { id: sessionIdForToken(token) } });
+    if (token) {
+      const sessionId = sessionIdForToken(token);
+      const session = await prisma!.session.findUnique({ where: { id: sessionId }, select: { userId: true } });
+      await prisma!.session.deleteMany({ where: { id: sessionId } });
+      if (session) revokeLiveSessions(session.userId, sessionId);
+    }
+    clearSessionCookie(reply);
+    return reply.code(204).send();
+  });
+
+  app.post("/api/auth/logout-all", { config: { rateLimit: { max: 5, timeWindow: "1 hour" } } }, async (request, reply) => {
+    if (!databaseRequired(reply)) return;
+    const user = await findRequestUser(request);
+    if (!user) return reply.code(401).send({ error: "Sign in to continue." });
+    await prisma!.session.deleteMany({ where: { userId: user.id } });
+    revokeLiveSessions(user.id);
     clearSessionCookie(reply);
     return reply.code(204).send();
   });

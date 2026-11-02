@@ -17,6 +17,12 @@ model Workspace {
 
   owner   User?             @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   members WorkspaceMember[]
+  aiConversations AiConversation[]
+  aiUsage AiUsage[]
+  aiCodeChunks AiCodeChunk[]
+  aiIndexStatus AiWorkspaceIndex?
+  changes WorkspaceChange[]
+  reviews WorkspaceReview[]
 
   @@index([ownerId])
 }
@@ -31,6 +37,11 @@ model User {
   sessions          Session[]
   ownedWorkspaces   Workspace[]       @relation("WorkspaceOwner")
   workspaceMemberships WorkspaceMember[]
+  aiConversations AiConversation[]
+  aiUsage AiUsage[]
+  workspaceChanges WorkspaceChange[]
+  workspaceReviews WorkspaceReview[]
+  reviewReplies WorkspaceReviewReply[]
 }
 
 model Session {
@@ -48,7 +59,7 @@ model Session {
 model WorkspaceMember {
   workspaceId String   @db.VarChar(80)
   userId      String   @db.VarChar(30)
-  role        String   @default("member") @db.VarChar(20)
+  role        String   @default("editor") @db.VarChar(20)
   createdAt   DateTime @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -56,4 +67,139 @@ model WorkspaceMember {
 
   @@id([workspaceId, userId])
   @@index([userId])
+}
+
+model WorkspaceChange {
+  id          String   @id @default(cuid()) @db.VarChar(30)
+  workspaceId String   @db.VarChar(80)
+  userId      String?  @db.VarChar(30)
+  actorName   String   @db.VarChar(100)
+  actorType   String   @default("human") @db.VarChar(20)
+  filePath    String   @db.Text
+  lineStart   Int
+  lineEnd     Int
+  operation   String   @default("edit") @db.VarChar(20)
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, filePath, createdAt])
+  @@index([userId, createdAt])
+}
+
+model WorkspaceReview {
+  id           String   @id @default(cuid()) @db.VarChar(30)
+  workspaceId  String   @db.VarChar(80)
+  authorId     String   @db.VarChar(30)
+  filePath     String   @db.Text
+  lineStart    Int
+  lineEnd      Int
+  originalText String   @db.Text
+  comment      String   @db.Text
+  suggestion   String?  @db.Text
+  status       String   @default("open") @db.VarChar(20)
+  createdAt    DateTime @default(now())
+  resolvedAt   DateTime?
+
+  workspace Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  author    User                  @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  replies   WorkspaceReviewReply[]
+
+  @@index([workspaceId, filePath, status, createdAt])
+}
+
+model WorkspaceReviewReply {
+  id        String   @id @default(cuid()) @db.VarChar(30)
+  reviewId  String   @db.VarChar(30)
+  authorId  String   @db.VarChar(30)
+  body      String   @db.Text
+  createdAt DateTime @default(now())
+
+  review WorkspaceReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  author User            @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([reviewId, createdAt])
+}
+
+model AiConversation {
+  id          String   @id @default(cuid()) @db.VarChar(30)
+  workspaceId String   @db.VarChar(80)
+  userId      String   @db.VarChar(30)
+  title       String   @default("New conversation") @db.VarChar(120)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  AiMessage[]
+  usage     AiUsage[]
+
+  @@index([workspaceId, userId, updatedAt])
+}
+
+model AiMessage {
+  id             String   @id @default(cuid()) @db.VarChar(30)
+  conversationId String   @db.VarChar(30)
+  role           String   @db.VarChar(20)
+  mode           String   @db.VarChar(10)
+  content        String   @db.Text
+  createdAt      DateTime @default(now())
+
+  conversation AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
+
+model AiUsage {
+  id             String   @id @default(cuid()) @db.VarChar(30)
+  workspaceId    String   @db.VarChar(80)
+  userId         String   @db.VarChar(30)
+  conversationId String   @db.VarChar(30)
+  model          String   @db.VarChar(100)
+  inputTokens    Int      @default(0)
+  outputTokens   Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversation AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([workspaceId, createdAt])
+}
+
+model AiCodeChunk {
+  id             String   @id @db.VarChar(30)
+  workspaceId    String   @db.VarChar(80)
+  path           String   @db.Text
+  chunkIndex     Int
+  fileHash        String   @db.VarChar(64)
+  content         String   @db.Text
+  lineStart       Int
+  lineEnd         Int
+  symbols         Json
+  imports         Json
+  embedding       Unsupported("vector(768)")?
+  embeddingModel  String   @db.VarChar(100)
+  updatedAt       DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, path, chunkIndex], map: "AiCodeChunk_workspaceId_path_chunkIndex_key")
+  @@index([workspaceId, path], map: "AiCodeChunk_workspaceId_path_idx")
+}
+
+model AiWorkspaceIndex {
+  workspaceId     String   @id @db.VarChar(80)
+  status           String   @default("pending") @db.VarChar(20)
+  embeddingModel  String   @db.VarChar(100)
+  fileCount        Int      @default(0)
+  chunkCount       Int      @default(0)
+  truncated        Boolean  @default(false)
+  lastError        String?  @db.Text
+  indexedAt        DateTime?
+  updatedAt        DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
