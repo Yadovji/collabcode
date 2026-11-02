@@ -5,13 +5,14 @@ import { apiRequest } from "./auth";
 import { isSafeFilePath } from "@collab/shared";
 
 type Mode = "ask" | "edit";
-type Proposal = { path: string; content: string; base: string };
+type ProposedFile = { path: string; content: string; base: string | null };
+type Proposal = { files: ProposedFile[]; selectedPath: string };
 type Message = { role: "user" | "assistant"; text: string };
 type Conversation = { id: string; title: string };
 
-export function AiAssistant({ roomId, activePath, open, readFile, applyFile, onClose }: {
-  roomId: string; activePath: string; open: boolean; readFile: (path: string) => string | undefined;
-  applyFile: (path: string, base: string, content: string) => boolean; onClose: () => void;
+export function AiAssistant({ roomId, activePath, open, readFiles, onClose }: {
+  roomId: string; activePath: string; open: boolean; readFiles: () => Record<string, string>;
+  onClose: () => void;
 }) {
   const [mode, setMode] = useState<Mode>("ask");
   const [prompt, setPrompt] = useState("");
@@ -74,7 +75,7 @@ export function AiAssistant({ roomId, activePath, open, readFile, applyFile, onC
   const submit = async () => {
     const question = prompt.trim();
     if (!question || busy) return;
-    const baseAtRequest = readFile(activePath) ?? "";
+    const snapshotAtRequest = readFiles();
     setPrompt(""); setError(""); setProposal(null); setBusy(true);
     setMessages((items) => [...items, { role: "user", text: question }, { role: "assistant", text: "" }]);
     const controller = new AbortController(); abortRef.current = controller;
@@ -111,25 +112,35 @@ export function AiAssistant({ roomId, activePath, open, readFile, applyFile, onC
       }
       if (mode === "edit") {
         const match = answer.match(/```(?:json)?\s*([\s\S]*?)```/i);
-        if (match) {
-          const parsed = JSON.parse(match[1]) as { path?: unknown; content?: unknown };
-          if (parsed.path === activePath && isSafeFilePath(parsed.path) && typeof parsed.content === "string") {
-            setProposal({ path: parsed.path, content: parsed.content, base: baseAtRequest });
-          }
-        }
+        try {
+          const parsed = match ? JSON.parse(match[1]) as { files?: unknown } : null;
+          if (!parsed || !Array.isArray(parsed.files) || parsed.files.length < 1 || parsed.files.length > 8) throw new Error("The model did not return a valid changeset. Ask it to try again.");
+          const seen = new Set<string>();
+          const files = parsed.files.map((value): ProposedFile => {
+            if (typeof value !== "object" || value === null) throw new Error("The model returned an invalid file proposal.");
+            const item = value as { path?: unknown; content?: unknown };
+            if (typeof item.path !== "string" || !isSafeFilePath(item.path) || seen.has(item.path) || typeof item.content !== "string" || new TextEncoder().encode(item.content).length > 50_000) throw new Error("The model returned an invalid or oversized file proposal.");
+            seen.add(item.path);
+            return { path: item.path, content: item.content, base: Object.hasOwn(snapshotAtRequest, item.path) ? snapshotAtRequest[item.path] : null };
+          });
+          setProposal({ files, selectedPath: files[0].path });
+        } catch (err) { setError(err instanceof Error ? err.message : "Could not parse the proposed changes."); }
       }
     } catch (err) {
       if (!controller.signal.aborted) setError(err instanceof Error ? err.message : "AI request failed.");
     } finally { setBusy(false); abortRef.current = null; }
   };
 
-  const accept = () => {
+  const selectedProposal = proposal?.files.find((file) => file.path === proposal.selectedPath);
+
+  const accept = async () => {
     if (!proposal) return;
-    if (!applyFile(proposal.path, proposal.base, proposal.content)) {
-      setError("This file changed while the proposal was open. Ask AI to regenerate it, then review the new diff.");
-      return;
-    }
-    setProposal(null); setError("");
+    try {
+      const response = await apiRequest(`/api/workspaces/${encodeURIComponent(roomId)}/ai/apply`, { method: "POST", body: JSON.stringify({ files: proposal.files }) });
+      const body = await response.json().catch(() => ({})) as { error?: string };
+      if (!response.ok) throw new Error(body.error || "Could not apply the proposed changes.");
+      setProposal(null); setError("");
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not apply the proposed changes."); }
   };
 
   return <aside className="ai-panel" aria-label="AI coding assistant" hidden={!open}>
@@ -141,7 +152,7 @@ export function AiAssistant({ roomId, activePath, open, readFile, applyFile, onC
     <div className="ai-messages" aria-live="polite">
       {!messages.length && <p className="ai-empty">Ask about your code or switch to Edit to request a proposed change. Changes are reviewed before they enter the shared workspace.</p>}
       {messages.map((message, index) => <article className={`ai-message ${message.role}`} key={index}><b>{message.role === "user" ? "You" : "Gemini"}</b><pre>{message.text || (busy ? "Thinking…" : "")}</pre></article>)}
-      {proposal && <section className="ai-proposal"><div className="ai-proposal-title">Review change · <code>{proposal.path}</code></div><div className="ai-diff"><DiffEditor height="240px" language={language} theme="vs-dark" original={proposal.base} modified={proposal.content} options={{ readOnly: true, renderSideBySide: true, minimap: { enabled: false }, automaticLayout: true }} /></div><div className="ai-proposal-actions"><button onClick={() => setProposal(null)}>Reject</button><button className="accept" onClick={accept}>Accept change</button></div></section>}
+      {proposal && selectedProposal && <section className="ai-proposal"><div className="ai-proposal-title">Review {proposal.files.length} file{proposal.files.length === 1 ? "" : "s"}</div><div className="ai-file-tabs">{proposal.files.map((file) => <button className={file.path === proposal.selectedPath ? "selected" : ""} key={file.path} onClick={() => setProposal({ ...proposal, selectedPath: file.path })}>{file.path}{file.base === null ? " · new" : ""}</button>)}</div><div className="ai-diff"><DiffEditor height="240px" language={selectedProposal.path.split(".").pop() || language} theme="vs-dark" original={selectedProposal.base || ""} modified={selectedProposal.content} options={{ readOnly: true, renderSideBySide: true, minimap: { enabled: false }, automaticLayout: true }} /></div><div className="ai-proposal-actions"><button onClick={() => setProposal(null)}>Reject all</button><button className="accept" onClick={() => void accept()}>Accept all changes</button></div></section>}
       {error && <p className="ai-error" role="alert">{error}</p>}
     </div>
     <form className="ai-compose" onSubmit={(event) => { event.preventDefault(); void submit(); }}><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={4000} placeholder={mode === "ask" ? "Ask about this workspace…" : "Describe the change you want…"} /><div><span>Code goes to Gemini. Messages save to your account’s workspace history.</span>{busy ? <button type="button" onClick={() => abortRef.current?.abort()}>Cancel</button> : <button type="submit" disabled={!prompt.trim() || available === false}>Send</button>}</div></form>

@@ -107,9 +107,9 @@ Deployment is prepared for a GitHub repository, a hosted PostgreSQL database, an
 
 ## Current scope and limitations
 
-- The optional AI panel supports streaming Ask and Edit. Edit proposals are shown in a Monaco diff and require explicit acceptance; accepted edits flow through Yjs. It is disabled unless `AI_ENABLED=true` and `GEMINI_API_KEY` is configured. The key stays on the API server.
+- The optional AI panel supports streaming Ask and Edit. Edit proposals can cover up to eight files, are shown one at a time in a Monaco diff, and require explicit acceptance; the API verifies all base versions and applies the accepted changeset atomically to the Yjs workspace. It is disabled unless `AI_ENABLED=true` and `GEMINI_API_KEY` is configured. The key stays on the API server.
 - AI context is assembled from a bounded set of workspace files with basic keyword ranking and filters for environment files, common credential files, build output, and binary content. This is not a persistent vector index/RAG implementation. Conversations and message text are stored in PostgreSQL per user and workspace; they cascade-delete with the owning user or workspace.
-- AI edits currently propose one active file at a time. Build mode, agent tool execution, dependency installation, isolated Docker execution, usage accounting, and undo history are not implemented. The assistant never runs workspace code on the API.
+- Build mode, agent tool execution, dependency installation, isolated Docker execution, usage accounting, and undo history are not implemented. The assistant never runs workspace code on the API.
 
 - Accounts use email and password, with passwords stored as scrypt hashes and sessions in PostgreSQL. Workspace owners can add existing accounts as members; server-side room joins require ownership or membership.
 - Invitations currently require the teammate to register first. Owners can remove invited members, which closes their active socket connection. Email verification, password reset, and account recovery are not implemented.

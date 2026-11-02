@@ -136,18 +136,6 @@ function Room() {
     }
   };
   const activeText = workspace.files.get(activeFile);
-  const applyAiFile = (path: string, base: string, content: string) => {
-    const existing = workspace.files.get(path);
-    if (existing) {
-      if (existing.toString() !== base) return false;
-      workspace.doc.transact(() => { existing.delete(0, existing.length); if (content) existing.insert(0, content); });
-      return true;
-    }
-    if (base || !isSafeFilePath(path)) return false;
-    workspace.createFile(path, content);
-    setActiveFile(path);
-    return true;
-  };
 
   const runWebsitePreview = () => {
     const snapshot = Object.create(null) as Record<string, string>;
@@ -261,7 +249,7 @@ function Room() {
         <div className="rail-foot"><span><Wifi size={12} /> Live sync on</span><span>Yjs · Socket.IO</span></div>
       </aside>
     </div>
-    {aiMounted && <AiAssistant roomId={roomId} activePath={activeFile} open={aiOpen} readFile={(path) => workspace.files.get(path)?.toString()} applyFile={applyAiFile} onClose={() => setAiOpen(false)} />}
+    {aiMounted && <AiAssistant roomId={roomId} activePath={activeFile} open={aiOpen} readFiles={() => Object.fromEntries([...workspace.files.entries()].map(([path, text]) => [path, text.toString()]))} onClose={() => setAiOpen(false)} />}
     <footer className="statusbar"><div><span className="status-green" /> Ready</div><div><span>Room: {roomId}</span><span>UTF-8</span><span>{previewOpen ? "HTML preview" : "TypeScript"}</span><span>Phase 4 prototype</span></div></footer>
   </div>;
 }
