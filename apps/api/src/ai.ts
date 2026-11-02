@@ -207,8 +207,9 @@ export function registerAiRoutes(app: FastifyInstance, getRoom: RoomLookup) {
     let answer = "";
     let interactionCompleted = false;
     let failureSent = false;
+    const outputTokenLimit = Math.min(mode === "ask" ? 8192 : 16384, dailyTokenLimit - dailyUsed);
     try {
-      const stream = await ai.interactions.create({ model, system_instruction: system, input, generation_config: { max_output_tokens: Math.min(8192, dailyTokenLimit - dailyUsed), temperature: 0.2 }, stream: true, store: false }, { timeout_ms: requestTimeoutMs, fetchOptions: { signal: abort.signal } });
+      const stream = await ai.interactions.create({ model, system_instruction: system, input, generation_config: { max_output_tokens: outputTokenLimit, temperature: 0.2, ...(mode === "build" ? { thinking_level: "low" as const } : {}) }, stream: true, store: false }, { timeout_ms: requestTimeoutMs, fetchOptions: { signal: abort.signal } });
       for await (const event of stream) {
         if (abort.signal.aborted) break;
         if (event.event_type === "step.delta" && event.delta.type === "text") { answer += event.delta.text; send("token", { text: event.delta.text }); }
@@ -220,10 +221,14 @@ export function registerAiRoutes(app: FastifyInstance, getRoom: RoomLookup) {
           break;
         }
         if (event.event_type === "interaction.completed") {
+          if (event.interaction.status === "requires_continuation") continue;
           if (event.interaction.status !== "completed" || !answer.trim()) {
             failureSent = true;
-            request.log.warn({ status: event.interaction.status, answerLength: answer.length }, "Gemini interaction completed without a usable text response");
-            send("error", { message: "Gemini did not return a complete text response. Please try again." });
+            request.log.warn({ status: event.interaction.status, answerLength: answer.length, outputTokens: event.interaction.usage?.total_output_tokens }, "Gemini interaction completed without a usable text response");
+            const message = event.interaction.status === "incomplete"
+              ? "Gemini stopped before finishing the file proposal. Ask for a smaller build and try again."
+              : "Gemini did not return a complete text response. Please try again.";
+            send("error", { message });
             break;
           }
           await prisma.aiMessage.create({ data: { conversationId: conversation.id, role: "assistant", mode, content: answer } });
