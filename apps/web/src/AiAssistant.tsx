@@ -122,7 +122,7 @@ export function AiAssistant({ roomId, activePath, selection, open, readFiles, on
         throw new Error(body.error || "The AI request failed.");
       }
       if (!response.body) throw new Error("Streaming is unavailable in this browser.");
-      const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ""; let answer = "";
+      const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ""; let answer = ""; let doneReceived = false;
       while (true) {
         const { value, done } = await reader.read(); if (done) break;
         buffer += decoder.decode(value, { stream: true });
@@ -140,9 +140,11 @@ export function AiAssistant({ roomId, activePath, selection, open, readFiles, on
             answer += data.text;
             setMessages((items) => items.map((item, i) => i === items.length - 1 ? { ...item, text: answer } : item));
           }
+          if (event === "done") doneReceived = true;
           if (event === "error") throw new Error(data.message || "AI request failed.");
         }
       }
+      if (!doneReceived) throw new Error("The AI response ended before Gemini finished. Please try again.");
       if (mode === "edit" || mode === "build") {
         const match = answer.match(/```(?:json)?\s*([\s\S]*?)```/i);
         try {
@@ -162,6 +164,10 @@ export function AiAssistant({ roomId, activePath, selection, open, readFiles, on
       }
       void refreshUsage();
     } catch (err) {
+      setMessages((items) => {
+        const last = items.at(-1);
+        return last?.role === "assistant" && !last.text ? items.slice(0, -1) : items;
+      });
       if (!controller.signal.aborted) setError(err instanceof Error ? err.message : "AI request failed.");
     } finally { setBusy(false); abortRef.current = null; }
   };

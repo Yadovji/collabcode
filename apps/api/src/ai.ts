@@ -176,17 +176,32 @@ export function registerAiRoutes(app: FastifyInstance, getRoom: RoomLookup) {
     }
     reply.raw.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
     const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), 60_000);
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; abort.abort(); }, 60_000);
     reply.raw.on("close", () => { if (!reply.raw.writableEnded) abort.abort(); });
     const send = (type: string, data: unknown) => { if (!reply.raw.destroyed) reply.raw.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`); };
     send("conversation", { id: conversation.id });
     let answer = "";
+    let interactionCompleted = false;
+    let failureSent = false;
     try {
       const stream = await ai.interactions.create({ model, system_instruction: system, input, generation_config: { max_output_tokens: Math.min(8192, dailyTokenLimit - dailyUsed), temperature: 0.2 }, stream: true, store: false }, { timeout_ms: 60_000, fetchOptions: { signal: abort.signal } });
       for await (const event of stream) {
         if (abort.signal.aborted) break;
         if (event.event_type === "step.delta" && event.delta.type === "text") { answer += event.delta.text; send("token", { text: event.delta.text }); }
+        if (event.event_type === "error") {
+          failureSent = true;
+          request.log.warn({ providerErrorCode: event.error?.code }, "Gemini stream returned an error event");
+          send("error", { message: "The AI provider could not complete this request. Try again." });
+          break;
+        }
         if (event.event_type === "interaction.completed") {
+          if (event.interaction.status !== "completed" || !answer.trim()) {
+            failureSent = true;
+            request.log.warn({ status: event.interaction.status, answerLength: answer.length }, "Gemini interaction completed without a usable text response");
+            send("error", { message: "Gemini did not return a complete text response. Please try again." });
+            break;
+          }
           await prisma.aiMessage.create({ data: { conversationId: conversation.id, role: "assistant", mode, content: answer } });
           await prisma.aiConversation.update({ where: { id: conversation.id }, data: { updatedAt: new Date() } });
           if (event.interaction.usage) {
@@ -200,11 +215,21 @@ export function registerAiRoutes(app: FastifyInstance, getRoom: RoomLookup) {
             } catch (error) { request.log.warn({ error }, "Could not record AI token usage"); }
           }
           send("done", { ok: true });
+          interactionCompleted = true;
+          break;
+        }
+      }
+      if (!interactionCompleted && !failureSent && !reply.raw.destroyed) {
+        if (timedOut) {
+          send("error", { message: "The AI request timed out before completion. Try a shorter prompt and try again." });
+        } else if (!abort.signal.aborted) {
+          request.log.warn({ answerLength: answer.length }, "Gemini stream ended without an interaction completion event");
+          send("error", { message: "The AI response ended before completion. Please try again." });
         }
       }
     } catch (error) {
       request.log.warn({ error }, "AI provider request failed");
-      send("error", { message: "The AI provider could not complete this request. Try again." });
+      if (!reply.raw.destroyed) send("error", { message: "The AI provider could not complete this request. Try again." });
     } finally {
       clearTimeout(timer);
       if (!reply.raw.destroyed) reply.raw.end();
