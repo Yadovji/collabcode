@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { GoogleGenAI } from "@google/genai";
 import { findRequestUser } from "./auth.js";
-import { ensureWorkspaceAccess } from "./workspaceAccess.js";
+import { ensureWorkspaceAccess, getWorkspaceRole } from "./workspaceAccess.js";
 import { isSafeFilePath } from "@collab/shared";
 import { prisma } from "./db.js";
 import { selectWorkspaceContext } from "./workspaceContext.js";
@@ -78,13 +78,15 @@ export function registerAiRoutes(app: FastifyInstance, getRoom: RoomLookup) {
     if (!user) return reply.code(401).send({ error: "Sign in to apply AI changes." });
     const { roomId } = request.params;
     if (!/^[a-zA-Z0-9_-]{1,80}$/.test(roomId)) return reply.code(400).send({ error: "Invalid workspace link." });
-    if (!(await ensureWorkspaceAccess(roomId, user.id))) return reply.code(404).send({ error: "Workspace not found." });
+    const role = await getWorkspaceRole(roomId, user.id);
+    if (!role) return reply.code(404).send({ error: "Workspace not found." });
+    if (role === "viewer") return reply.code(403).send({ error: "Viewer access cannot apply code changes." });
     const input = request.body?.files;
     if (!Array.isArray(input)) return reply.code(400).send({ error: "A file changeset is required." });
     const updates = input as FileChange[];
     const room = await getRoom(roomId);
     if (!room) return reply.code(404).send({ error: "Workspace document is unavailable." });
-    const result = applyFileChanges(room.doc, updates);
+    const result = applyFileChanges(room.doc, updates, { kind: "agent", actorId: user.id, actorName: "Gemini" });
     if (!result.ok) return reply.code(result.status).send({ error: result.error });
     return { applied: result.applied };
   });

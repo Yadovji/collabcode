@@ -5,9 +5,10 @@ import type { Awareness } from "y-protocols/awareness";
 import { MonacoBinding } from "y-monaco";
 import { getLanguageForPath } from "@collab/shared";
 
-type Props = { path: string; text: Y.Text; awareness: Awareness; onSelectionChange?: (selection: string) => void };
+export type ReviewSelection = { lineStart: number; lineEnd: number; text: string };
+type Props = { path: string; text: Y.Text; awareness: Awareness; readOnly?: boolean; onSelectionChange?: (selection: string) => void; onReviewSelectionChange?: (selection: ReviewSelection) => void };
 
-export function CollaborativeEditor({ path, text, awareness, onSelectionChange }: Props) {
+export function CollaborativeEditor({ path, text, awareness, readOnly = false, onSelectionChange, onReviewSelectionChange }: Props) {
   const bindingRef = useRef<MonacoBinding | null>(null);
   const selectionListenerRef = useRef<{ dispose: () => void } | null>(null);
 
@@ -20,6 +21,14 @@ export function CollaborativeEditor({ path, text, awareness, onSelectionChange }
         const selection = editor.getSelection();
         const selectedText = selection && !selection.isEmpty() ? model.getValueInRange(selection).slice(0, 12000) : "";
         onSelectionChange?.(selectedText);
+        const position = selection?.getStartPosition() || editor.getPosition();
+        const endPosition = selection?.getEndPosition() || position;
+        if (position) {
+          const lineStart = Math.min(position.lineNumber, endPosition?.lineNumber || position.lineNumber);
+          const lineEnd = Math.max(position.lineNumber, endPosition?.lineNumber || position.lineNumber);
+          const textForLines = model.getLinesContent().slice(lineStart - 1, lineEnd).join("\n");
+          onReviewSelectionChange?.({ lineStart, lineEnd, text: textForLines.slice(0, 12000) });
+        }
       });
     }
   };
@@ -36,6 +45,8 @@ export function CollaborativeEditor({ path, text, awareness, onSelectionChange }
     onMount={onMount}
     theme="vs-dark"
     options={{
+      readOnly,
+      domReadOnly: readOnly,
       automaticLayout: true,
       fontFamily: "'JetBrains Mono', 'Cascadia Code', Consolas, monospace",
       fontSize: 13,

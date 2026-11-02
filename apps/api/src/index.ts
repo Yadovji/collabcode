@@ -10,11 +10,12 @@ import { Server, type Socket } from "socket.io";
 import * as Y from "yjs";
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate, removeAwarenessStates } from "y-protocols/awareness";
 import { isSafeFilePath, SOCKET_EVENTS } from "@collab/shared";
-import { findUserForCookieHeader, registerAuthRoutes } from "./auth.js";
+import { findUserForSessionToken, registerAuthRoutes, sessionIdForToken, sessionTokenFromCookieHeader } from "./auth.js";
 import { persistenceEnabled, prisma } from "./db.js";
 import { loadWorkspaceDocument, saveWorkspaceDocument } from "./workspaceStore.js";
-import { ensureWorkspaceAccess, registerWorkspaceRoutes } from "./workspaceAccess.js";
+import { ensureWorkspaceAccess, getWorkspaceRole, registerWorkspaceRoutes } from "./workspaceAccess.js";
 import { registerAiRoutes } from "./ai.js";
+import { registerCollaborationRoutes } from "./collaboration.js";
 import { scheduleWorkspaceIndex } from "./workspaceIndex.js";
 
 const port = Number(process.env.PORT || 4000);
@@ -51,8 +52,6 @@ app.get("/health", async (_request, reply) => {
     return reply.code(503).send({ status: "error", service: "collab-api", persistence: "unavailable" });
   }
 });
-registerAuthRoutes(app);
-
 type Room = {
   id: string;
   doc: Y.Doc;
@@ -65,6 +64,73 @@ const rooms = new Map<string, Room>();
 const roomLoads = new Map<string, Promise<Room>>();
 const socketRooms = new Map<string, string>();
 const socketAwarenessClients = new Map<string, number[]>();
+
+type ChangeActor = { userId: string | null; name: string; type: "human" | "agent" };
+type PendingChange = ChangeActor & { workspaceId: string; filePath: string; lineStart: number; lineEnd: number; operation: string; timer: ReturnType<typeof setTimeout> };
+const pendingChanges = new Map<string, PendingChange>();
+
+function changedLineRange(before: string, after: string): { lineStart: number; lineEnd: number } | null {
+  if (before === after) return null;
+  const beforeLines = before.split("\n");
+  const afterLines = after.split("\n");
+  let prefix = 0;
+  while (prefix < beforeLines.length && prefix < afterLines.length && beforeLines[prefix] === afterLines[prefix]) prefix++;
+  let suffix = 0;
+  while (suffix < beforeLines.length - prefix && suffix < afterLines.length - prefix
+    && beforeLines[beforeLines.length - 1 - suffix] === afterLines[afterLines.length - 1 - suffix]) suffix++;
+  const lineStart = prefix + 1;
+  const lineEnd = Math.max(lineStart, afterLines.length - suffix);
+  return { lineStart, lineEnd };
+}
+
+function changeActorForOrigin(origin: unknown): ChangeActor | null {
+  if (typeof origin === "string") {
+    const socket = io.sockets.sockets.get(origin);
+    const user = socket?.data.user as { id?: string; name?: string } | undefined;
+    return user?.id ? { userId: user.id, name: user.name || "Collaborator", type: "human" } : null;
+  }
+  if (typeof origin === "object" && origin !== null && "kind" in origin && origin.kind === "agent") {
+    const value = origin as { actorId?: unknown; actorName?: unknown };
+    return { userId: typeof value.actorId === "string" ? value.actorId : null, name: typeof value.actorName === "string" ? value.actorName : "AI assistant", type: "agent" };
+  }
+  if (typeof origin === "object" && origin !== null && "kind" in origin && origin.kind === "human") {
+    const value = origin as { actorId?: unknown; actorName?: unknown };
+    return { userId: typeof value.actorId === "string" ? value.actorId : null, name: typeof value.actorName === "string" ? value.actorName : "Collaborator", type: "human" };
+  }
+  return null;
+}
+
+function flushPendingChange(key: string): Promise<void> {
+  const pending = pendingChanges.get(key);
+  if (!pending) return Promise.resolve();
+  clearTimeout(pending.timer);
+  pendingChanges.delete(key);
+  if (!prisma) return Promise.resolve();
+  const { timer: _timer, name, type, ...change } = pending;
+  const data = { ...change, actorName: name, actorType: type };
+  return prisma.workspaceChange.create({ data }).then(() => undefined).catch((error: unknown) => {
+    app.log.warn({ error, workspaceId: data.workspaceId }, "Could not save workspace line activity");
+  });
+}
+
+function queueLineActivity(workspaceId: string, filePath: string, range: { lineStart: number; lineEnd: number }, actor: ChangeActor, operation = "edit") {
+  if (!prisma) return;
+  const key = `${workspaceId}\0${filePath}\0${actor.type}\0${actor.userId || actor.name}`;
+  const existing = pendingChanges.get(key);
+  if (existing) {
+    existing.lineStart = Math.min(existing.lineStart, range.lineStart);
+    existing.lineEnd = Math.max(existing.lineEnd, range.lineEnd);
+    existing.operation = existing.operation === operation ? operation : "edit";
+    clearTimeout(existing.timer);
+    existing.timer = setTimeout(() => flushPendingChange(key), 1800);
+    return;
+  }
+  const pending: PendingChange = {
+    workspaceId, filePath, ...range, ...actor, operation,
+    timer: setTimeout(() => flushPendingChange(key), 1800)
+  };
+  pendingChanges.set(key, pending);
+}
 
 function asUint8Array(value: unknown): Uint8Array | null {
   if (value instanceof Uint8Array) return value;
@@ -105,8 +171,46 @@ async function getRoom(roomId: string, io: Server): Promise<Room> {
     const doc = await loadWorkspaceDocument(roomId);
     const awareness = new Awareness(doc);
     const room: Room = { id: roomId, doc, awareness, sockets: new Set(), persistenceQueue: Promise.resolve() };
+    const files = doc.getMap<Y.Text>("files");
+    const textObservers = new Map<Y.Text, { path: string; contents: string; observer: (event: Y.YTextEvent, transaction: Y.Transaction) => void }>();
+    const syncTextObservers = () => {
+      const activeTexts = new Set(files.values());
+      for (const [text, tracked] of textObservers) {
+        if (activeTexts.has(text)) continue;
+        text.unobserve(tracked.observer);
+        textObservers.delete(text);
+      }
+      for (const [filePath, text] of files) {
+        const tracked = textObservers.get(text);
+        if (tracked) { tracked.path = filePath; continue; }
+        const entry = { path: filePath, contents: text.toString(), observer: (_event: Y.YTextEvent, _transaction: Y.Transaction) => undefined };
+        entry.observer = (_event, transaction) => {
+          const nextContents = text.toString();
+          const changed = changedLineRange(entry.contents, nextContents);
+          entry.contents = nextContents;
+          const actor = changeActorForOrigin(transaction.origin);
+          if (changed && actor) queueLineActivity(roomId, entry.path, changed, actor);
+        };
+        textObservers.set(text, entry);
+        text.observe(entry.observer);
+      }
+    };
+    files.observe((event: Y.YMapEvent<Y.Text>) => {
+      const actor = changeActorForOrigin(event.transaction.origin);
+      if (actor) {
+        for (const [filePath, change] of event.keys) {
+          if (change.action === "add") {
+            const text = files.get(filePath);
+            if (text) queueLineActivity(roomId, filePath, { lineStart: 1, lineEnd: Math.max(1, text.toString().split("\n").length) }, actor, "create");
+          } else if (change.action === "delete" && change.oldValue instanceof Y.Text) {
+            queueLineActivity(roomId, filePath, { lineStart: 1, lineEnd: Math.max(1, change.oldValue.toString().split("\n").length) }, actor, "delete");
+          }
+        }
+      }
+      syncTextObservers();
+    });
+    syncTextObservers();
     const scheduleIndex = () => scheduleWorkspaceIndex(roomId, () => {
-      const files = doc.getMap<Y.Text>("files");
       return [...files.entries()].map(([path, text]) => [path, text.toString()] as [string, string]);
     });
 
@@ -151,7 +255,17 @@ const io = new Server(app.server, {
   transports: ["websocket", "polling"]
 });
 
+registerAuthRoutes(app, (userId, sessionId) => {
+  for (const socket of io.sockets.sockets.values()) {
+    const socketUser = socket.data.user as { id?: string } | undefined;
+    if (socketUser?.id !== userId || (sessionId && socket.data.sessionId !== sessionId)) continue;
+    socket.emit(SOCKET_EVENTS.error, "Your sign-in session was revoked. Please sign in again.");
+    socket.disconnect(true);
+  }
+});
+
 registerAiRoutes(app, async (roomId) => await getRoom(roomId, io));
+registerCollaborationRoutes(app, async (roomId) => await getRoom(roomId, io));
 
 registerWorkspaceRoutes(app, (roomId, userId) => {
   for (const socket of io.sockets.sockets.values()) {
@@ -165,9 +279,11 @@ registerWorkspaceRoutes(app, (roomId, userId) => {
 
 io.use(async (socket, next) => {
   try {
-    const user = await findUserForCookieHeader(socket.handshake.headers.cookie);
+    const token = sessionTokenFromCookieHeader(socket.handshake.headers.cookie);
+    const user = await findUserForSessionToken(token);
     if (!user) return next(new Error("Sign in to connect to a workspace."));
     socket.data.user = user;
+    socket.data.sessionId = token ? sessionIdForToken(token) : undefined;
     next();
   } catch (error) {
     app.log.error({ error }, "Could not validate a socket session");
@@ -196,6 +312,12 @@ io.on("connection", (socket: Socket) => {
         socket.emit(SOCKET_EVENTS.error, "You do not have access to this workspace. Ask its owner to invite your account.");
         return;
       }
+      const role = await getWorkspaceRole(roomId, user.id);
+      if (!role) {
+        socket.emit(SOCKET_EVENTS.error, "You do not have access to this workspace. Ask its owner to invite your account.");
+        return;
+      }
+      socket.data.workspaceRole = role;
       room = await getRoom(roomId, io);
     } catch (error) {
       app.log.error({ error, roomId }, "Could not load workspace");
@@ -212,6 +334,7 @@ io.on("connection", (socket: Socket) => {
   });
 
   socket.on(SOCKET_EVENTS.documentUpdate, (update: unknown) => {
+    if (socket.data.workspaceRole === "viewer") return;
     const roomId = socketRooms.get(socket.id);
     const room = roomId && rooms.get(roomId);
     const bytes = asUint8Array(update);
@@ -231,6 +354,7 @@ io.on("connection", (socket: Socket) => {
   });
 
   socket.on(SOCKET_EVENTS.fileCreate, (payload: unknown) => {
+    if (socket.data.workspaceRole === "viewer") return;
     const roomId = socketRooms.get(socket.id);
     const room = roomId && rooms.get(roomId);
     const input = typeof payload === "string" ? { path: payload, contents: "" } : payload;
@@ -246,6 +370,7 @@ io.on("connection", (socket: Socket) => {
   });
 
   socket.on(SOCKET_EVENTS.fileDelete, (path: unknown) => {
+    if (socket.data.workspaceRole === "viewer") return;
     const roomId = socketRooms.get(socket.id);
     const room = roomId && rooms.get(roomId);
     if (!room || !isSafeFilePath(path)) return;
@@ -292,6 +417,7 @@ app.log.info(`CollabCode API listening on 0.0.0.0:${port}`);
 
 const shutdown = async () => {
   await io.close();
+  await Promise.all([...pendingChanges.keys()].map((key) => flushPendingChange(key)));
   await Promise.all([...rooms.values()].map((room) => persistRoom(room)));
   await app.close();
   for (const room of rooms.values()) { room.awareness.destroy(); room.doc.destroy(); }

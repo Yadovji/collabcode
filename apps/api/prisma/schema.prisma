@@ -21,6 +21,8 @@ model Workspace {
   aiUsage AiUsage[]
   aiCodeChunks AiCodeChunk[]
   aiIndexStatus AiWorkspaceIndex?
+  changes WorkspaceChange[]
+  reviews WorkspaceReview[]
 
   @@index([ownerId])
 }
@@ -37,6 +39,9 @@ model User {
   workspaceMemberships WorkspaceMember[]
   aiConversations AiConversation[]
   aiUsage AiUsage[]
+  workspaceChanges WorkspaceChange[]
+  workspaceReviews WorkspaceReview[]
+  reviewReplies WorkspaceReviewReply[]
 }
 
 model Session {
@@ -54,7 +59,7 @@ model Session {
 model WorkspaceMember {
   workspaceId String   @db.VarChar(80)
   userId      String   @db.VarChar(30)
-  role        String   @default("member") @db.VarChar(20)
+  role        String   @default("editor") @db.VarChar(20)
   createdAt   DateTime @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -62,6 +67,59 @@ model WorkspaceMember {
 
   @@id([workspaceId, userId])
   @@index([userId])
+}
+
+model WorkspaceChange {
+  id          String   @id @default(cuid()) @db.VarChar(30)
+  workspaceId String   @db.VarChar(80)
+  userId      String?  @db.VarChar(30)
+  actorName   String   @db.VarChar(100)
+  actorType   String   @default("human") @db.VarChar(20)
+  filePath    String   @db.Text
+  lineStart   Int
+  lineEnd     Int
+  operation   String   @default("edit") @db.VarChar(20)
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, filePath, createdAt])
+  @@index([userId, createdAt])
+}
+
+model WorkspaceReview {
+  id           String   @id @default(cuid()) @db.VarChar(30)
+  workspaceId  String   @db.VarChar(80)
+  authorId     String   @db.VarChar(30)
+  filePath     String   @db.Text
+  lineStart    Int
+  lineEnd      Int
+  originalText String   @db.Text
+  comment      String   @db.Text
+  suggestion   String?  @db.Text
+  status       String   @default("open") @db.VarChar(20)
+  createdAt    DateTime @default(now())
+  resolvedAt   DateTime?
+
+  workspace Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  author    User                  @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  replies   WorkspaceReviewReply[]
+
+  @@index([workspaceId, filePath, status, createdAt])
+}
+
+model WorkspaceReviewReply {
+  id        String   @id @default(cuid()) @db.VarChar(30)
+  reviewId  String   @db.VarChar(30)
+  authorId  String   @db.VarChar(30)
+  body      String   @db.Text
+  createdAt DateTime @default(now())
+
+  review WorkspaceReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  author User            @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([reviewId, createdAt])
 }
 
 model AiConversation {

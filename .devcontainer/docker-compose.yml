@@ -1,0 +1,30 @@
+services:
+  workspace:
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+    command: sleep infinity
+    volumes:
+      - ..:/workspaces/collab-code-platform:cached
+    working_dir: /workspaces/collab-code-platform
+    environment:
+      DATABASE_URL: postgresql://collab:collab_dev_password@postgres:5432/collabcode?schema=public
+      NODE_ENV: development
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: pgvector/pgvector:0.8.7-pg16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: collab
+      POSTGRES_PASSWORD: collab_dev_password
+      POSTGRES_DB: collabcode
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U collab -d collabcode"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+volumes: {}

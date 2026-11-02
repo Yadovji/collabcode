@@ -4,7 +4,7 @@ import { isSafeFilePath } from "@collab/shared";
 export type FileChange = { path: string; base: string | null; content: string };
 export type ApplyResult = { ok: true; applied: string[] } | { ok: false; status: 400 | 409 | 413; error: string };
 
-export function applyFileChanges(doc: Y.Doc, updates: FileChange[]): ApplyResult {
+export function applyFileChanges(doc: Y.Doc, updates: FileChange[], origin?: unknown): ApplyResult {
   if (!Array.isArray(updates) || updates.length < 1 || updates.length > 8) return { ok: false, status: 400, error: "A change must contain between 1 and 8 files." };
   const seen = new Set<string>();
   let totalBytes = 0;
@@ -29,6 +29,6 @@ export function applyFileChanges(doc: Y.Doc, updates: FileChange[]): ApplyResult
       if (current) { current.delete(0, current.length); if (update.content) current.insert(0, update.content); }
       else { const text = new Y.Text(); if (update.content) text.insert(0, update.content); files.set(update.path, text); }
     }
-  });
+  }, origin);
   return { ok: true, applied: updates.map((update) => update.path) };
 }

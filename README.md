@@ -1,6 +1,6 @@
-# CollabCode — Phase 4 + optional AI assistant
+# CollabCode — Collaborative coding workspace
 
-CollabCode is a browser-based shared coding workspace. It includes account registration and login, PostgreSQL-backed sessions, workspace ownership and membership, real-time editing with Monaco and Yjs/Socket.IO, a sandboxed preview for simple multi-file websites, and an optional Gemini coding assistant for workspace-aware questions and reviewed single-file edits.
+CollabCode is a browser-based shared coding workspace. It includes account registration and login, PostgreSQL-backed sessions, owner/editor/viewer access, real-time editing with Monaco and Yjs/Socket.IO, durable workspace review threads and line-range activity, a sandboxed preview for simple multi-file websites, and an optional Gemini coding assistant for workspace-aware questions and reviewed multi-file edits.
 
 ## Run locally
 
@@ -34,6 +34,22 @@ PostgreSQL is required for account sessions, workspace ownership, invitations, a
 Create an account or sign in first. New workspaces belong to their creator. To let a teammate in, the owner uses **Invite by email** in the room; the teammate must have an account before they can be added. Sharing the room URL alone does not grant access. Existing Phase 2 workspaces without an owner are claimed by the first signed-in user who opens them. You can change your display name from the bottom of the file sidebar.
 
 For live collaboration, sign in as the owner in one browser profile and as an invited member in a separate browser profile. The same browser's regular and private windows have separate sessions.
+
+### Priority collaboration milestone
+
+| Capability | Status in this repository | Scope and boundary |
+| --- | --- | --- |
+| Real-time conflict-free editing | Implemented | Yjs CRDT document updates sync through Socket.IO; workspace snapshots persist in PostgreSQL. |
+| Access control and session revocation | Implemented | Server-enforced owner/editor/viewer roles; owners can change roles or remove members; users can sign out everywhere, which revokes sessions and disconnects their active sockets. |
+| Declarative cloud development environment | Starter configuration implemented | `.devcontainer/` defines a Codespaces-compatible Node/PostgreSQL development container and forwards the app/API ports. A hosting provider must still create/run the cloud workspace; CollabCode does not provision cloud machines itself. |
+| Collaborative review and inline suggestions | In-app review implemented; GitHub PR integration remains | Members can comment on selected lines, reply, propose/apply a replacement when the original lines are unchanged, and resolve threads. These are workspace review threads, not GitHub pull requests or GitHub inline PR comments. |
+| Human/AI line attribution | Partial | PostgreSQL records coalesced edit events with actor and changed line range, including accepted Gemini edits. It is an activity trail, not a full Git blame view: later insertions/deletions can move lines, and it does not retain the complete revision history. |
+
+The database migration for roles, review threads, replies, and line activity is additive. The production Docker image and the documented Render start command run `prisma migrate deploy` before starting the API.
+
+### Use the prebuilt development container
+
+The committed `.devcontainer/devcontainer.json` works with GitHub Codespaces and VS Code Dev Containers. Open the repository in either environment; the container installs dependencies, runs database migrations, starts PostgreSQL, and forwards the web/API ports. Then run `npm run dev` in the container terminal and open forwarded port 5173. This is a reproducible developer environment, not a container in which user projects are built or executed by CollabCode.
 
 ## Run a multi-file website
 
@@ -123,6 +139,8 @@ Deployment is prepared for a GitHub repository, a hosted PostgreSQL database, an
 
 ## Next phases
 
-1. Workspace version history and multi-instance collaboration support.
-2. Persistent AI conversations, structured multi-file proposals, and usage controls.
+1. Connect GitHub repositories and PRs with OAuth/app credentials, webhook validation, and comment synchronization.
+2. Provision and manage hosted development containers from the product, including lifecycle controls and per-workspace resource limits.
+3. Add durable revision snapshots and stable line attribution across edits, renames, and deletions.
+4. Add multi-instance collaboration support and a shared rate-limit store before scaling beyond one API process.
 3. Isolated execution workers and restricted previews.
