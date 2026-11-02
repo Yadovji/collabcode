@@ -85,7 +85,7 @@ export function AiAssistant({ roomId, activePath, selection, open, readFiles, on
   }, [roomId]);
 
   const selectConversation = async (id: string) => {
-    setError(""); setProposal(null);
+    setError(""); setProposal(null); setPlan([]);
     if (!id) { setConversationId(null); setMessages([]); return; }
     try {
       const response = await apiRequest(`/api/workspaces/${encodeURIComponent(roomId)}/ai/conversations/${encodeURIComponent(id)}`);
@@ -101,7 +101,7 @@ export function AiAssistant({ roomId, activePath, selection, open, readFiles, on
     const response = await apiRequest(`/api/workspaces/${encodeURIComponent(roomId)}/ai/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE" });
     if (!response.ok) { const body = await response.json().catch(() => ({})) as { error?: string }; setError(body.error || "Could not delete this conversation."); return; }
     const remaining = conversations.filter((item) => item.id !== conversationId);
-    setConversations(remaining); setConversationId(null); setMessages([]); setProposal(null); setError("");
+    setConversations(remaining); setConversationId(null); setMessages([]); setProposal(null); setPlan([]); setError("");
     if (remaining.length) await selectConversation(remaining[0].id);
   };
 
@@ -138,7 +138,7 @@ export function AiAssistant({ roomId, activePath, selection, open, readFiles, on
           }
           if (event === "token" && data.text) {
             answer += data.text;
-            setMessages((items) => items.map((item, i) => i === items.length - 1 ? { ...item, text: answer } : item));
+            if (mode === "ask") setMessages((items) => items.map((item, i) => i === items.length - 1 ? { ...item, text: answer } : item));
           }
           if (event === "done") doneReceived = true;
           if (event === "error") throw new Error(data.message || "AI request failed.");
@@ -147,20 +147,21 @@ export function AiAssistant({ roomId, activePath, selection, open, readFiles, on
       if (!doneReceived) throw new Error("The AI response ended before Gemini finished. Please try again.");
       if (mode === "edit" || mode === "build") {
         const match = answer.match(/```(?:json)?\s*([\s\S]*?)```/i);
-        try {
-          const parsed = match ? JSON.parse(match[1]) as { files?: unknown; plan?: unknown } : null;
-          if (!parsed || !Array.isArray(parsed.files) || parsed.files.length > 8 || (mode === "edit" && parsed.files.length < 1)) throw new Error("The model did not return a valid changeset. Ask it to try again.");
-          if (mode === "build" && Array.isArray(parsed.plan)) setPlan(parsed.plan.filter((step): step is string => typeof step === "string").slice(0, 12));
-          const seen = new Set<string>();
-          const files = parsed.files.map((value): ProposedFile => {
-            if (typeof value !== "object" || value === null) throw new Error("The model returned an invalid file proposal.");
-            const item = value as { path?: unknown; content?: unknown };
-            if (typeof item.path !== "string" || !isSafeFilePath(item.path) || seen.has(item.path) || typeof item.content !== "string" || new TextEncoder().encode(item.content).length > 50_000) throw new Error("The model returned an invalid or oversized file proposal.");
-            seen.add(item.path);
-            return { path: item.path, content: item.content, base: Object.hasOwn(snapshotAtRequest, item.path) ? snapshotAtRequest[item.path] : null };
-          });
-          if (files.length) setProposal({ files, selectedPath: files[0].path });
-        } catch (err) { setError(err instanceof Error ? err.message : "Could not parse the proposed changes."); }
+        let parsed: { files?: unknown; plan?: unknown };
+        try { parsed = JSON.parse(match?.[1] ?? answer.trim()) as { files?: unknown; plan?: unknown }; }
+        catch { throw new Error("Gemini returned invalid file proposal data. Try the build again with a smaller scope."); }
+        if (!Array.isArray(parsed.files) || parsed.files.length < 1 || parsed.files.length > 8 || (mode === "build" && !Array.isArray(parsed.plan))) throw new Error("The model did not return a complete file proposal. Ask it to try again.");
+        if (mode === "build" && Array.isArray(parsed.plan)) setPlan(parsed.plan.filter((step): step is string => typeof step === "string").slice(0, 12));
+        const seen = new Set<string>();
+        const files = parsed.files.map((value): ProposedFile => {
+          if (typeof value !== "object" || value === null) throw new Error("The model returned an invalid file proposal.");
+          const item = value as { path?: unknown; content?: unknown };
+          if (typeof item.path !== "string" || !isSafeFilePath(item.path) || seen.has(item.path) || typeof item.content !== "string" || new TextEncoder().encode(item.content).length > 50_000) throw new Error("The model returned an invalid or oversized file proposal.");
+          seen.add(item.path);
+          return { path: item.path, content: item.content, base: Object.hasOwn(snapshotAtRequest, item.path) ? snapshotAtRequest[item.path] : null };
+        });
+        setProposal({ files, selectedPath: files[0].path });
+        setMessages((items) => items.map((item, index) => index === items.length - 1 ? { ...item, text: `Prepared a proposal for ${files.length} file${files.length === 1 ? "" : "s"}. Review it below.` } : item));
       }
       void refreshUsage();
     } catch (err) {
@@ -186,7 +187,7 @@ export function AiAssistant({ roomId, activePath, selection, open, readFiles, on
 
   return <aside className="ai-panel" aria-label="AI coding assistant" hidden={!open}>
     <header className="ai-header"><div><b>AI Assistant</b><small>Workspace context · Gemini · History saved to your account</small></div><button className="ai-close" onClick={onClose} aria-label="Close AI assistant">×</button></header>
-    <div className="ai-history"><select aria-label="Conversation history" value={conversationId || ""} onChange={(event) => void selectConversation(event.target.value)}><option value="">New conversation</option>{conversations.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select><button onClick={() => { setConversationId(null); setMessages([]); setProposal(null); setError(""); }}>New</button><button title="Delete selected conversation" disabled={!conversationId} onClick={() => void deleteConversation()}><Trash2 size={12} /></button></div>
+    <div className="ai-history"><select aria-label="Conversation history" value={conversationId || ""} onChange={(event) => void selectConversation(event.target.value)}><option value="">New conversation</option>{conversations.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select><button onClick={() => { setConversationId(null); setMessages([]); setProposal(null); setPlan([]); setError(""); }}>New</button><button title="Delete selected conversation" disabled={!conversationId} onClick={() => void deleteConversation()}><Trash2 size={12} /></button></div>
     <div className="ai-modes"><button className={mode === "ask" ? "selected" : ""} onClick={() => setMode("ask")}>Ask</button><button className={mode === "edit" ? "selected" : ""} onClick={() => setMode("edit")}>Edit</button><button className={mode === "build" ? "selected" : ""} onClick={() => setMode("build")}>Build</button></div>
     <div className="ai-context">Context: <code>{activePath}</code>, {selection ? "selected code, and related files" : "related workspace files"}{usage && <span> · Today {usage.dailyUsed.toLocaleString()} / {usage.dailyLimit.toLocaleString()} tokens</span>}</div>
     {indexStatus?.enabled && <div className="ai-context" role="status">{indexStatus.status === "ready" ? `Semantic index: ${indexStatus.fileCount} files, ${indexStatus.chunkCount} code chunks${indexStatus.truncated ? " (workspace index size limit reached)" : ""}` : indexStatus.status === "error" ? "Semantic search is unavailable; keyword context is still active." : "Indexing workspace code for semantic search…"}</div>}
