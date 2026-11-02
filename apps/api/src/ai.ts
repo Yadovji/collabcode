@@ -166,7 +166,14 @@ export function registerAiRoutes(app: FastifyInstance, getRoom: RoomLookup) {
       return null;
     }).filter((step) => step !== null);
     input.push({ type: "user_input", content: [{ type: "text", text: JSON.stringify({ workspace_context: context, user_request: prompt }) }] });
+    const fastifyHeaders = reply.getHeaders();
     reply.hijack();
+    // Hijacking bypasses Fastify's normal send path, which would copy reply
+    // headers (including CORS) onto the raw Node response. Preserve them before
+    // opening the SSE stream so browsers do not reject and close the response.
+    for (const [name, value] of Object.entries(fastifyHeaders)) {
+      if (value !== undefined) reply.raw.setHeader(name, value);
+    }
     reply.raw.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", "Connection": "keep-alive", "X-Accel-Buffering": "no" });
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), 60_000);
