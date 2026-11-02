@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DiffEditor } from "@monaco-editor/react";
+import { Trash2 } from "lucide-react";
 import { apiRequest } from "./auth";
 import { isSafeFilePath } from "@collab/shared";
 
 type Mode = "ask" | "edit";
 type Proposal = { path: string; content: string; base: string };
 type Message = { role: "user" | "assistant"; text: string };
+type Conversation = { id: string; title: string };
 
 export function AiAssistant({ roomId, activePath, open, readFile, applyFile, onClose }: {
   roomId: string; activePath: string; open: boolean; readFile: (path: string) => string | undefined;
@@ -14,6 +16,8 @@ export function AiAssistant({ roomId, activePath, open, readFile, applyFile, onC
   const [mode, setMode] = useState<Mode>("ask");
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -29,6 +33,44 @@ export function AiAssistant({ roomId, activePath, open, readFile, applyFile, onC
     return () => { alive = false; };
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    void apiRequest(`/api/workspaces/${encodeURIComponent(roomId)}/ai/conversations`).then(async (response) => {
+      const result = await response.json() as { conversations?: Conversation[] };
+      if (!response.ok) throw new Error("Could not load conversation history.");
+      if (!alive) return;
+      const items = result.conversations || [];
+      setConversations(items);
+      if (!items.length) return;
+      setConversationId(items[0].id);
+      const detail = await apiRequest(`/api/workspaces/${encodeURIComponent(roomId)}/ai/conversations/${encodeURIComponent(items[0].id)}`);
+      const body = await detail.json() as { conversation?: { messages?: Array<{ role: string; content: string }> } };
+      if (alive && detail.ok) setMessages((body.conversation?.messages || []).filter((message): message is { role: "user" | "assistant"; content: string } => message.role === "user" || message.role === "assistant").map((message) => ({ role: message.role, text: message.content })));
+    }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [roomId]);
+
+  const selectConversation = async (id: string) => {
+    setError(""); setProposal(null);
+    if (!id) { setConversationId(null); setMessages([]); return; }
+    try {
+      const response = await apiRequest(`/api/workspaces/${encodeURIComponent(roomId)}/ai/conversations/${encodeURIComponent(id)}`);
+      const body = await response.json() as { conversation?: { messages?: Array<{ role: string; content: string }> }; error?: string };
+      if (!response.ok) throw new Error(body.error || "Could not load this conversation.");
+      setConversationId(id);
+      setMessages((body.conversation?.messages || []).filter((message): message is { role: "user" | "assistant"; content: string } => message.role === "user" || message.role === "assistant").map((message) => ({ role: message.role, text: message.content })));
+    } catch (err) { setError(err instanceof Error ? err.message : "Could not load conversation."); }
+  };
+
+  const deleteConversation = async () => {
+    if (!conversationId || !window.confirm("Delete this AI conversation and its saved messages?")) return;
+    const response = await apiRequest(`/api/workspaces/${encodeURIComponent(roomId)}/ai/conversations/${encodeURIComponent(conversationId)}`, { method: "DELETE" });
+    if (!response.ok) { const body = await response.json().catch(() => ({})) as { error?: string }; setError(body.error || "Could not delete this conversation."); return; }
+    const remaining = conversations.filter((item) => item.id !== conversationId);
+    setConversations(remaining); setConversationId(null); setMessages([]); setProposal(null); setError("");
+    if (remaining.length) await selectConversation(remaining[0].id);
+  };
+
   const submit = async () => {
     const question = prompt.trim();
     if (!question || busy) return;
@@ -39,7 +81,7 @@ export function AiAssistant({ roomId, activePath, open, readFile, applyFile, onC
     try {
       const response = await apiRequest(`/api/workspaces/${encodeURIComponent(roomId)}/ai/stream`, {
         method: "POST", signal: controller.signal,
-        body: JSON.stringify({ prompt: question, mode, path: activePath })
+        body: JSON.stringify({ prompt: question, mode, path: activePath, conversationId })
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({})) as { error?: string };
@@ -56,6 +98,10 @@ export function AiAssistant({ roomId, activePath, open, readFile, applyFile, onC
           const payload = frame.match(/^data: (.+)$/m)?.[1];
           if (!event || !payload) continue;
           const data = JSON.parse(payload) as { text?: string; message?: string };
+          if (event === "conversation" && typeof (data as { id?: unknown }).id === "string") {
+            const id = (data as { id: string }).id; setConversationId(id);
+            setConversations((items) => items.some((item) => item.id === id) ? items : [{ id, title: question.slice(0, 120) }, ...items].slice(0, 25));
+          }
           if (event === "token" && data.text) {
             answer += data.text;
             setMessages((items) => items.map((item, i) => i === items.length - 1 ? { ...item, text: answer } : item));
@@ -87,7 +133,8 @@ export function AiAssistant({ roomId, activePath, open, readFile, applyFile, onC
   };
 
   return <aside className="ai-panel" aria-label="AI coding assistant" hidden={!open}>
-    <header className="ai-header"><div><b>AI Assistant</b><small>Workspace context · Gemini</small></div><button className="ai-close" onClick={onClose} aria-label="Close AI assistant">×</button></header>
+    <header className="ai-header"><div><b>AI Assistant</b><small>Workspace context · Gemini · History saved to your account</small></div><button className="ai-close" onClick={onClose} aria-label="Close AI assistant">×</button></header>
+    <div className="ai-history"><select aria-label="Conversation history" value={conversationId || ""} onChange={(event) => void selectConversation(event.target.value)}><option value="">New conversation</option>{conversations.map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select><button onClick={() => { setConversationId(null); setMessages([]); setProposal(null); setError(""); }}>New</button><button title="Delete selected conversation" disabled={!conversationId} onClick={() => void deleteConversation()}><Trash2 size={12} /></button></div>
     <div className="ai-modes"><button className={mode === "ask" ? "selected" : ""} onClick={() => setMode("ask")}>Ask</button><button className={mode === "edit" ? "selected" : ""} onClick={() => setMode("edit")}>Edit</button></div>
     <div className="ai-context">Context: <code>{activePath}</code> and related workspace files</div>
     {available === false && <div className="ai-disabled" role="status">AI is unavailable. Enable `AI_ENABLED` and configure `GEMINI_API_KEY` on the API server.</div>}
@@ -97,6 +144,6 @@ export function AiAssistant({ roomId, activePath, open, readFile, applyFile, onC
       {proposal && <section className="ai-proposal"><div className="ai-proposal-title">Review change · <code>{proposal.path}</code></div><div className="ai-diff"><DiffEditor height="240px" language={language} theme="vs-dark" original={proposal.base} modified={proposal.content} options={{ readOnly: true, renderSideBySide: true, minimap: { enabled: false }, automaticLayout: true }} /></div><div className="ai-proposal-actions"><button onClick={() => setProposal(null)}>Reject</button><button className="accept" onClick={accept}>Accept change</button></div></section>}
       {error && <p className="ai-error" role="alert">{error}</p>}
     </div>
-    <form className="ai-compose" onSubmit={(event) => { event.preventDefault(); void submit(); }}><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={4000} placeholder={mode === "ask" ? "Ask about this workspace…" : "Describe the change you want…"} /><div><span>Code is sent to Gemini when you submit.</span>{busy ? <button type="button" onClick={() => abortRef.current?.abort()}>Cancel</button> : <button type="submit" disabled={!prompt.trim() || available === false}>Send</button>}</div></form>
+    <form className="ai-compose" onSubmit={(event) => { event.preventDefault(); void submit(); }}><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={4000} placeholder={mode === "ask" ? "Ask about this workspace…" : "Describe the change you want…"} /><div><span>Code goes to Gemini. Messages save to your account’s workspace history.</span>{busy ? <button type="button" onClick={() => abortRef.current?.abort()}>Cancel</button> : <button type="submit" disabled={!prompt.trim() || available === false}>Send</button>}</div></form>
   </aside>;
 }

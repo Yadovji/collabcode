@@ -65,6 +65,7 @@ function Room() {
   const [chatOpen, setChatOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [aiMounted, setAiMounted] = useState(false);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [previewWarnings, setPreviewWarnings] = useState<string[]>([]);
   const [previewErrors, setPreviewErrors] = useState<string[]>([]);
@@ -229,7 +230,7 @@ function Room() {
       </aside>
 
       <main className="editor-area">
-        <div className="editor-tabs"><div className="editor-tab"><span className="tab-file-icon">{activeFile.endsWith(".ts") ? "TS" : activeFile.endsWith(".json") ? "{}" : "M"}</span>{activeFile}<span className="tab-dot" /></div><div className="editor-tab-actions"><span className="saving-indicator"><span /> All changes synced</span><button className="preview-run-button" onClick={() => setAiOpen((open) => !open)} title="Open AI assistant"><Sparkles size={12} /> AI</button><button className="preview-run-button" onClick={runWebsitePreview} disabled={!workspace.synced} title="Run the shared HTML website in a sandboxed preview"><Play size={12} /> Run preview</button><button className="icon-button" title="Open collaboration panel" onClick={() => { setTab("Collaboration"); setChatOpen(!chatOpen); }}><Users size={15} /></button></div></div>
+        <div className="editor-tabs"><div className="editor-tab"><span className="tab-file-icon">{activeFile.endsWith(".ts") ? "TS" : activeFile.endsWith(".json") ? "{}" : "M"}</span>{activeFile}<span className="tab-dot" /></div><div className="editor-tab-actions"><span className="saving-indicator"><span /> All changes synced</span><button className="preview-run-button" onClick={() => { setAiMounted(true); setAiOpen((open) => !open); }} title="Open AI assistant"><Sparkles size={12} /> AI</button><button className="preview-run-button" onClick={runWebsitePreview} disabled={!workspace.synced} title="Run the shared HTML website in a sandboxed preview"><Play size={12} /> Run preview</button><button className="icon-button" title="Open collaboration panel" onClick={() => { setTab("Collaboration"); setChatOpen(!chatOpen); }}><Users size={15} /></button></div></div>
         <div className="editor-breadcrumb"><span>workspace</span><span>/</span><b>{activeFile}</b></div>
         <div className="monaco-wrap">
           {previewOpen ? <section className="website-preview">
@@ -260,7 +261,7 @@ function Room() {
         <div className="rail-foot"><span><Wifi size={12} /> Live sync on</span><span>Yjs · Socket.IO</span></div>
       </aside>
     </div>
-    <AiAssistant roomId={roomId} activePath={activeFile} open={aiOpen} readFile={(path) => workspace.files.get(path)?.toString()} applyFile={applyAiFile} onClose={() => setAiOpen(false)} />
+    {aiMounted && <AiAssistant roomId={roomId} activePath={activeFile} open={aiOpen} readFile={(path) => workspace.files.get(path)?.toString()} applyFile={applyAiFile} onClose={() => setAiOpen(false)} />}
     <footer className="statusbar"><div><span className="status-green" /> Ready</div><div><span>Room: {roomId}</span><span>UTF-8</span><span>{previewOpen ? "HTML preview" : "TypeScript"}</span><span>Phase 4 prototype</span></div></footer>
   </div>;
 }

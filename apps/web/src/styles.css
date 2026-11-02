@@ -71,3 +71,4 @@ h1 em { color: #a89aff; font-style: normal; }
 @media (max-width: 720px) { .ai-panel { top: auto; bottom: 32px; right: 6px; width: calc(100vw - 12px); height: min(78vh, 720px); } }
 .ai-disabled { margin: 0 13px 8px; padding: 8px; border: 1px solid #554a31; border-radius: 5px; color: #dfc68f; background: #2a251a; font-size: 9px; line-height: 1.5; }
 .ai-panel[hidden] { display: none; }
+.ai-history { display: flex; gap: 7px; padding: 7px 13px; }.ai-history select { flex: 1; min-width: 0; color: #c7c4d0; background: #101115; border: 1px solid #34343d; border-radius: 5px; padding: 5px 7px; font-size: 9px; }.ai-history button { color: #c4baff; background: transparent; border: 1px solid #393642; border-radius: 5px; padding: 4px 9px; font-size: 9px; cursor: pointer; }

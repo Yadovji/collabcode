@@ -108,7 +108,7 @@ Deployment is prepared for a GitHub repository, a hosted PostgreSQL database, an
 ## Current scope and limitations
 
 - The optional AI panel supports streaming Ask and Edit. Edit proposals are shown in a Monaco diff and require explicit acceptance; accepted edits flow through Yjs. It is disabled unless `AI_ENABLED=true` and `GEMINI_API_KEY` is configured. The key stays on the API server.
-- AI context is assembled from a bounded set of workspace files with basic keyword ranking and filters for environment files, common credential files, build output, and binary content. This is not a persistent vector index/RAG implementation. Conversation history is held in the panel session and is not stored in PostgreSQL.
+- AI context is assembled from a bounded set of workspace files with basic keyword ranking and filters for environment files, common credential files, build output, and binary content. This is not a persistent vector index/RAG implementation. Conversations and message text are stored in PostgreSQL per user and workspace; they cascade-delete with the owning user or workspace.
 - AI edits currently propose one active file at a time. Build mode, agent tool execution, dependency installation, isolated Docker execution, usage accounting, and undo history are not implemented. The assistant never runs workspace code on the API.
 
 - Accounts use email and password, with passwords stored as scrypt hashes and sessions in PostgreSQL. Workspace owners can add existing accounts as members; server-side room joins require ownership or membership.

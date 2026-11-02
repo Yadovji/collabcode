@@ -13,6 +13,7 @@
   "scripts": {
     "dev": "npm run build --workspace @collab/shared && concurrently -k -n API,WEB -c blue,green \"npm run dev --workspace @collab/api\" \"npm run dev --workspace @collab/web\"",
     "build": "npm run build --workspace @collab/shared && npm run build --workspace @collab/api && npm run build --workspace @collab/web",
+    "test": "npm run test --workspace @collab/api",
     "start": "npm run start --workspace @collab/api",
     "db:up": "docker compose up -d postgres",
     "db:down": "docker compose stop postgres",

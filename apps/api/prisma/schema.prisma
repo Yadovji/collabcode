@@ -17,6 +17,7 @@ model Workspace {
 
   owner   User?             @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   members WorkspaceMember[]
+  aiConversations AiConversation[]
 
   @@index([ownerId])
 }
@@ -31,6 +32,7 @@ model User {
   sessions          Session[]
   ownedWorkspaces   Workspace[]       @relation("WorkspaceOwner")
   workspaceMemberships WorkspaceMember[]
+  aiConversations AiConversation[]
 }
 
 model Session {
@@ -56,4 +58,32 @@ model WorkspaceMember {
 
   @@id([workspaceId, userId])
   @@index([userId])
+}
+
+model AiConversation {
+  id          String   @id @default(cuid()) @db.VarChar(30)
+  workspaceId String   @db.VarChar(80)
+  userId      String   @db.VarChar(30)
+  title       String   @default("New conversation") @db.VarChar(120)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  AiMessage[]
+
+  @@index([workspaceId, userId, updatedAt])
+}
+
+model AiMessage {
+  id             String   @id @default(cuid()) @db.VarChar(30)
+  conversationId String   @db.VarChar(30)
+  role           String   @db.VarChar(20)
+  mode           String   @db.VarChar(10)
+  content        String   @db.Text
+  createdAt      DateTime @default(now())
+
+  conversation AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
 }
