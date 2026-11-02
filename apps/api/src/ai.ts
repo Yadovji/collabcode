@@ -118,6 +118,16 @@ export function registerAiRoutes(app: FastifyInstance, getRoom: RoomLookup) {
         if (event.event_type === "interaction.completed") {
           await prisma.aiMessage.create({ data: { conversationId: conversation.id, role: "assistant", mode, content: answer } });
           await prisma.aiConversation.update({ where: { id: conversation.id }, data: { updatedAt: new Date() } });
+          if (event.interaction.usage) {
+            try {
+              await prisma.aiUsage.create({ data: {
+                workspaceId: roomId, userId: user.id, conversationId: conversation.id,
+                model: event.interaction.model || model,
+                inputTokens: event.interaction.usage.total_input_tokens || 0,
+                outputTokens: event.interaction.usage.total_output_tokens || 0
+              } });
+            } catch (error) { request.log.warn({ error }, "Could not record AI token usage"); }
+          }
           send("done", { ok: true });
         }
       }
