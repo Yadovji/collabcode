@@ -37,3 +37,18 @@ test("workspace context bounds file count and per-file content", () => {
   assert.equal(context.files[1].text.length, 1600);
   assert.equal(context.selection.length, 12000);
 });
+
+test("retrieves a relevant deep line window with symbol and import metadata", () => {
+  const lines = Array.from({ length: 90 }, (_, index) => `// filler line ${index} ${"x".repeat(80)}`);
+  lines[70] = "export class ValidationService { check() { return true; } }";
+  lines[71] = "export function validateSession() { return new ValidationService(); }";
+  lines[72] = "import { Session } from './session.js';";
+  const context = JSON.parse(selectWorkspaceContext(asEntries({ "src/service.ts": lines.join("\n") }), "find ValidationService", undefined, "")) as {
+    files: Array<{ name: string; text: string; lineStart: number; lineEnd: number; symbols: Array<{ name: string; line: number }>; imports: string[] }>;
+  };
+  const file = context.files[0];
+  assert.ok(file.text.includes("class ValidationService"));
+  assert.ok(file.lineStart <= 71 && file.lineEnd >= 71);
+  assert.ok(file.symbols.some((symbol) => symbol.name === "ValidationService" && symbol.line === 71));
+  assert.ok(file.imports.includes("./session.js"));
+});
