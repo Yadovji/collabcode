@@ -15,6 +15,28 @@ const enabled = process.env.AI_ENABLED === "true";
 const configuredDailyTokenLimit = Number(process.env.AI_DAILY_TOKEN_LIMIT || 100_000);
 const dailyTokenLimit = Number.isSafeInteger(configuredDailyTokenLimit) && configuredDailyTokenLimit > 0 ? configuredDailyTokenLimit : 100_000;
 
+function describeProviderFailure(value: unknown) {
+  const outer = value && typeof value === "object" ? value as {
+    status?: unknown; statusCode?: unknown; code?: unknown;
+    error?: { code?: unknown; error?: { code?: unknown } };
+  } : {};
+  const status = typeof outer.status === "number" ? outer.status : typeof outer.statusCode === "number" ? outer.statusCode : undefined;
+  const code = [outer.code, outer.error?.code, outer.error?.error?.code].find((candidate): candidate is string => typeof candidate === "string");
+  if (status === 503 || code === "service_unavailable") {
+    return { status, code, message: "Gemini is temporarily busy (503). Wait a minute and try again, or set GEMINI_MODEL=gemini-3.7-flash in .env to use another supported model." };
+  }
+  if (status === 429 || code === "resource_exhausted" || code === "quota_exceeded") {
+    return { status, code, message: "Gemini's request quota or rate limit was reached. Check your Google AI Studio usage limits, then try again later." };
+  }
+  if (status === 401 || status === 403 || code === "unauthenticated" || code === "permission_denied") {
+    return { status, code, message: "Gemini rejected the API key or its permissions. Check the key and Gemini API access in Google AI Studio." };
+  }
+  if (status === 400 || status === 404 || code === "invalid_request" || code === "not_found") {
+    return { status, code, message: "Gemini rejected the model or request settings. Check GEMINI_MODEL and the API server logs." };
+  }
+  return { status, code, message: "The Gemini API could not complete this request. Check the API server logs and try again." };
+}
+
 export function aiStatus() { return { enabled, configured: Boolean(process.env.GEMINI_API_KEY) }; }
 
 export function registerAiRoutes(app: FastifyInstance, getRoom: RoomLookup) {
@@ -191,8 +213,9 @@ export function registerAiRoutes(app: FastifyInstance, getRoom: RoomLookup) {
         if (event.event_type === "step.delta" && event.delta.type === "text") { answer += event.delta.text; send("token", { text: event.delta.text }); }
         if (event.event_type === "error") {
           failureSent = true;
-          request.log.warn({ providerErrorCode: event.error?.code }, "Gemini stream returned an error event");
-          send("error", { message: "The AI provider could not complete this request. Try again." });
+          const failure = describeProviderFailure(event.error);
+          request.log.warn({ providerStatus: failure.status, providerErrorCode: failure.code }, "Gemini stream returned an error event");
+          send("error", { message: failure.message });
           break;
         }
         if (event.event_type === "interaction.completed") {
@@ -228,8 +251,9 @@ export function registerAiRoutes(app: FastifyInstance, getRoom: RoomLookup) {
         }
       }
     } catch (error) {
-      request.log.warn({ error }, "AI provider request failed");
-      if (!reply.raw.destroyed) send("error", { message: "The AI provider could not complete this request. Try again." });
+      const failure = describeProviderFailure(error);
+      request.log.warn({ providerStatus: failure.status, providerErrorCode: failure.code }, "AI provider request failed");
+      if (!reply.raw.destroyed) send("error", { message: failure.message });
     } finally {
       clearTimeout(timer);
       if (!reply.raw.destroyed) reply.raw.end();
