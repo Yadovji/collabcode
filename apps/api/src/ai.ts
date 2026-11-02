@@ -251,8 +251,10 @@ export function registerAiRoutes(app: FastifyInstance, getRoom: RoomLookup) {
         }
       }
     } catch (error) {
-      const failure = describeProviderFailure(error);
-      request.log.warn({ providerStatus: failure.status, providerErrorCode: failure.code }, "AI provider request failed");
+      const failure = timedOut
+        ? { status: undefined, code: "request_timeout", message: "Gemini did not respond within 60 seconds. It may be overloaded; retry later or try GEMINI_MODEL=gemini-2.5-flash." }
+        : describeProviderFailure(error);
+      request.log.warn({ providerStatus: failure.status, providerErrorCode: failure.code, timedOut }, "AI provider request failed");
       if (!reply.raw.destroyed) send("error", { message: failure.message });
     } finally {
       clearTimeout(timer);
