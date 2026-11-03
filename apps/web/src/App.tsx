@@ -8,7 +8,6 @@ import { apiRequest, useAuth } from "./auth";
 import { useWorkspace } from "./useWorkspace";
 import { CollaborativeEditor, type ReviewSelection } from "./CollaborativeEditor";
 import { buildWebsitePreview, WEBSITE_STARTER_FILES } from "./websitePreview";
-import { AiAssistant } from "./AiAssistant";
 import { ReviewPanel } from "./ReviewPanel";
 
 function Home() {
@@ -107,8 +106,6 @@ function Room() {
   const [tab, setTab] = useState("Explorer");
   const [chatOpen, setChatOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [aiOpen, setAiOpen] = useState(false);
-  const [aiMounted, setAiMounted] = useState(false);
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [previewWarnings, setPreviewWarnings] = useState<string[]>([]);
   const [previewErrors, setPreviewErrors] = useState<string[]>([]);
@@ -383,7 +380,7 @@ function Room() {
       </aside>
 
       <main className="editor-area">
-        <div className="editor-tabs"><div className="editor-tab"><span className="tab-file-icon">{activeFile.endsWith(".ts") ? "TS" : activeFile.endsWith(".json") ? "{}" : "M"}</span>{activeFile}<span className="tab-dot" /></div><div className="editor-tab-actions"><span className="saving-indicator"><span /> All changes synced</span><button className="preview-run-button" onClick={() => { setAiMounted(true); setAiOpen((open) => !open); }} title="Open AI assistant"><Sparkles size={12} /> AI</button><button className="preview-run-button" onClick={runWebsitePreview} disabled={!workspace.synced} title="Run the shared HTML website in a sandboxed preview"><Play size={12} /> Run preview</button><button className="icon-button" title="Open collaboration panel" onClick={() => { setTab("Collaboration"); setChatOpen(!chatOpen); }}><Users size={15} /></button></div></div>
+        <div className="editor-tabs"><div className="editor-tab"><span className="tab-file-icon">{activeFile.endsWith(".ts") ? "TS" : activeFile.endsWith(".json") ? "{}" : "M"}</span>{activeFile}<span className="tab-dot" /></div><div className="editor-tab-actions"><span className="saving-indicator"><span /> All changes synced</span><button className="preview-run-button" onClick={runWebsitePreview} disabled={!workspace.synced} title="Run the shared HTML website in a sandboxed preview"><Play size={12} /> Run preview</button><button className="icon-button" title="Open collaboration panel" onClick={() => { setTab("Collaboration"); setChatOpen(!chatOpen); }}><Users size={15} /></button></div></div>
         <div className="editor-breadcrumb"><span>workspace</span><span>/</span><b>{activeFile}</b></div>
         <div className="monaco-wrap">
           {previewOpen ? <section className="website-preview">
@@ -414,7 +411,6 @@ function Room() {
         <div className="rail-foot"><span><Wifi size={12} /> Live sync on</span><span>Yjs · Socket.IO</span></div>
       </aside>
     </div>
-    {aiMounted && <AiAssistant roomId={roomId} activePath={activeFile} selection={editorSelection} open={aiOpen} readFiles={() => Object.fromEntries([...workspace.files.entries()].map(([path, text]) => [path, text.toString()]))} onClose={() => setAiOpen(false)} />}
     {quickOpen && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setQuickOpen(false); }}>
       <section className="quick-open-dialog" role="dialog" aria-modal="true" aria-labelledby="quick-open-title">
         <div className="quick-open-title"><div><Search size={16} /><b id="quick-open-title">Open a file</b><small>Type part of a file name. Press Ctrl+P anytime.</small></div><button className="icon-button" aria-label="Close file search" onClick={() => setQuickOpen(false)}><X size={16} /></button></div>
