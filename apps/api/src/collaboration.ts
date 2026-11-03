@@ -142,7 +142,7 @@ export function registerCollaborationRoutes(app: FastifyInstance, getRoom: RoomL
     const changes = await prisma.workspaceChange.findMany({
       where: { workspaceId: roomId, ...(filePath ? { filePath } : {}) },
       orderBy: { createdAt: "desc" }, take: 60,
-      select: { id: true, actorName: true, actorType: true, filePath: true, lineStart: true, lineEnd: true, operation: true, createdAt: true }
+      select: { id: true, userId: true, actorName: true, actorType: true, filePath: true, lineStart: true, lineEnd: true, operation: true, createdAt: true }
     });
     return { changes };
   });

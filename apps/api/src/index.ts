@@ -68,6 +68,7 @@ const socketAwarenessClients = new Map<string, number[]>();
 type ChangeActor = { userId: string | null; name: string; type: "human" | "agent" };
 type PendingChange = ChangeActor & { workspaceId: string; filePath: string; lineStart: number; lineEnd: number; operation: string; timer: ReturnType<typeof setTimeout> };
 const pendingChanges = new Map<string, PendingChange>();
+const lineActivityMergeWindowMs = 2 * 60 * 1000;
 
 function changedLineRange(before: string, after: string): { lineStart: number; lineEnd: number } | null {
   if (before === after) return null;
@@ -108,7 +109,30 @@ function flushPendingChange(key: string): Promise<void> {
   if (!prisma) return Promise.resolve();
   const { timer: _timer, name, type, ...change } = pending;
   const data = { ...change, actorName: name, actorType: type };
-  return prisma.workspaceChange.create({ data }).then(() => undefined).catch((error: unknown) => {
+  const cutoff = new Date(Date.now() - lineActivityMergeWindowMs);
+  return prisma.workspaceChange.findFirst({
+    where: {
+      workspaceId: data.workspaceId,
+      userId: data.userId,
+      actorName: data.actorName,
+      actorType: data.actorType,
+      filePath: data.filePath,
+      operation: data.operation,
+      createdAt: { gte: cutoff }
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, lineStart: true, lineEnd: true }
+  }).then((previous) => previous
+    ? prisma!.workspaceChange.update({
+      where: { id: previous.id },
+      data: {
+        lineStart: Math.min(previous.lineStart, data.lineStart),
+        lineEnd: Math.max(previous.lineEnd, data.lineEnd),
+        createdAt: new Date()
+      }
+    })
+    : prisma!.workspaceChange.create({ data })
+  ).then(() => undefined).catch((error: unknown) => {
     app.log.warn({ error, workspaceId: data.workspaceId }, "Could not save workspace line activity");
   });
 }

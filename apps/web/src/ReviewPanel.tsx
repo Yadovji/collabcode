@@ -16,7 +16,35 @@ type Review = {
   author: { id: string; name: string };
   replies: Reply[];
 };
-type LineChange = { id: string; actorName: string; actorType: string; filePath: string; lineStart: number; lineEnd: number; operation: string; createdAt: string };
+type LineChange = { id: string; userId: string | null; actorName: string; actorType: string; filePath: string; lineStart: number; lineEnd: number; operation: string; createdAt: string };
+type GroupedLineChange = LineChange & { groupedCount: number };
+
+function groupRecentChanges(changes: LineChange[]): GroupedLineChange[] {
+  const groups: LineChange[][] = [];
+  const mergeWindowMs = 2 * 60 * 1000;
+
+  for (const change of changes) {
+    const changeTime = Date.parse(change.createdAt);
+    const group = groups.find((items) => {
+      const latest = items[0];
+      return latest.userId === change.userId
+        && latest.actorName === change.actorName
+        && latest.actorType === change.actorType
+        && latest.filePath === change.filePath
+        && latest.operation === change.operation
+        && changeTime <= Date.parse(latest.createdAt) + mergeWindowMs;
+    });
+    if (group) group.push(change);
+    else groups.push([change]);
+  }
+
+  return groups.map((items) => ({
+    ...items[0],
+    lineStart: Math.min(...items.map((item) => item.lineStart)),
+    lineEnd: Math.max(...items.map((item) => item.lineEnd)),
+    groupedCount: items.length
+  }));
+}
 
 async function requestResult<T>(response: Response): Promise<T> {
   const result = await response.json().catch(() => ({})) as T & { error?: string };
@@ -40,6 +68,7 @@ export function ReviewPanel({ roomId, filePath, selection, userId, canEdit, canM
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const groupedChanges = groupRecentChanges(changes);
 
   const refresh = useCallback(async () => {
     try {
@@ -138,9 +167,10 @@ export function ReviewPanel({ roomId, filePath, selection, userId, canEdit, canM
 
     <details className="line-history" open>
       <summary>Recent line activity</summary>
-      {changes.length === 0 ? <p className="review-empty">Edits will appear here with their author and line range.</p> : changes.map((change) => <div className="line-history-row" key={change.id}>
+      {groupedChanges.length === 0 ? <p className="review-empty">Edits will appear here with their author, file, and line range.</p> : groupedChanges.map((change) => <div className="line-history-row" key={change.id}>
         <b>{change.actorType === "agent" ? `${change.actorName} (AI)` : change.actorName}</b>
-        <span>{change.operation} lines {change.lineStart}-{change.lineEnd}</span>
+        <code>{change.filePath}</code>
+        <span>{change.operation === "edit" ? "edited" : change.operation === "create" ? "created" : "deleted"} {change.lineStart === change.lineEnd ? `line ${change.lineStart}` : `lines ${change.lineStart}-${change.lineEnd}`}{change.groupedCount > 1 ? ` · ${change.groupedCount} updates grouped` : ""}</span>
         <small>{new Date(change.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</small>
       </div>)}
     </details>
