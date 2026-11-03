@@ -1,4 +1,6 @@
 import type { FastifyInstance } from "fastify";
+import { randomUUID } from "node:crypto";
+import { ECOMMERCE_STARTER_FILES, STARTER_FILES } from "@collab/shared";
 import { prisma } from "./db.js";
 import { findRequestUser } from "./auth.js";
 import { createStarterState } from "./workspaceStore.js";
@@ -53,6 +55,24 @@ export function registerWorkspaceRoutes(app: FastifyInstance, revokeLiveAccess: 
     return { workspaces: workspaces.map((workspace) => ({ id: workspace.id, name: workspace.name, role: workspace.ownerId === user.id ? "owner" : workspace.members[0]?.role === "viewer" ? "viewer" : "editor" })) };
   });
 
+  app.post<{ Body: { name?: unknown; template?: unknown } }>("/api/workspaces", { config: { rateLimit: { max: 30, timeWindow: "1 hour" } } }, async (request, reply) => {
+    if (!prisma) return reply.code(503).send({ error: "PostgreSQL is required to create a workspace." });
+    const user = await findRequestUser(request);
+    if (!user) return reply.code(401).send({ error: "Sign in to create a workspace." });
+    const template = request.body?.template === undefined ? "typescript" : request.body.template;
+    if (template !== "typescript" && template !== "ecommerce") return reply.code(400).send({ error: "Choose a supported project template." });
+    const defaultName = template === "ecommerce" ? "E-commerce storefront" : "Untitled workspace";
+    const name = typeof request.body?.name === "string" ? request.body.name.trim() : defaultName;
+    if (!name || name.length > 120) return reply.code(400).send({ error: "Project names must be between 1 and 120 characters." });
+    const id = `room-${randomUUID()}`;
+    const starterFiles = template === "ecommerce" ? ECOMMERCE_STARTER_FILES : STARTER_FILES;
+    const workspace = await prisma.workspace.create({
+      data: { id, name, ownerId: user.id, documentState: Buffer.from(createStarterState(starterFiles)) },
+      select: { id: true, name: true }
+    });
+    return reply.code(201).send({ workspace: { ...workspace, role: "owner" as const } });
+  });
+
   app.get<{ Params: { roomId: string } }>("/api/workspaces/:roomId/members", async (request, reply) => {
     if (!prisma) return reply.code(503).send({ error: "PostgreSQL is required for workspace members." });
     const user = await findRequestUser(request);
@@ -64,6 +84,7 @@ export function registerWorkspaceRoutes(app: FastifyInstance, revokeLiveAccess: 
     const workspace = await prisma.workspace.findUnique({
       where: { id: request.params.roomId },
       select: {
+        name: true,
         owner: { select: { id: true, name: true, email: true } },
         members: { select: { role: true, user: { select: { id: true, name: true, email: true } } }, orderBy: { createdAt: "asc" } }
       }
@@ -73,6 +94,7 @@ export function registerWorkspaceRoutes(app: FastifyInstance, revokeLiveAccess: 
     return {
       canManage,
       currentRole,
+      workspaceName: workspace.name,
       // Only the owner needs the access directory; avoid exposing members'
       // email addresses to every invited collaborator.
       members: canManage ? [

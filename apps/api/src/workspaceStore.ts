@@ -2,11 +2,11 @@ import * as Y from "yjs";
 import { STARTER_FILES } from "@collab/shared";
 import { prisma } from "./db.js";
 
-export function createStarterState(): Uint8Array {
+export function createStarterState(starterFiles: Record<string, string> = STARTER_FILES): Uint8Array {
   const doc = new Y.Doc();
   const files = doc.getMap<Y.Text>("files");
   doc.transact(() => {
-    for (const [path, content] of Object.entries(STARTER_FILES)) {
+    for (const [path, content] of Object.entries(starterFiles)) {
       const text = new Y.Text();
       text.insert(0, content);
       files.set(path, text);

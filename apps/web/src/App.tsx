@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
-import { Archive, ArrowRight, Check, Code2, Download, FilePlus2, Folder, LockKeyhole, MessageSquare, MousePointer2, Network, Play, Radio, Search, Sparkles, Upload, Users, Wifi, WifiOff, X } from "lucide-react";
+import { Archive, ArrowRight, Code2, Download, FilePlus2, Folder, LockKeyhole, MessageSquare, Play, Plus, Radio, Search, ShoppingBag, Sparkles, Upload, Users, Wifi, WifiOff, X } from "lucide-react";
 import { strToU8, zipSync } from "fflate";
 import { DEFAULT_ROOM_ID, isSafeFilePath } from "@collab/shared";
 import { AuthPage } from "./AuthPage";
@@ -11,18 +11,14 @@ import { buildWebsitePreview, WEBSITE_STARTER_FILES } from "./websitePreview";
 import { AiAssistant } from "./AiAssistant";
 import { ReviewPanel } from "./ReviewPanel";
 
-function makeRoomId() {
-  return `room-${crypto.randomUUID().slice(0, 8)}`;
-}
-
 function Home() {
   const navigate = useNavigate();
   const { user, logout, logoutEverywhere } = useAuth();
   const [workspaces, setWorkspaces] = useState<Array<{ id: string; name: string; role: string }>>([]);
   const [workspaceError, setWorkspaceError] = useState("");
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(true);
-  const [sampleOpened, setSampleOpened] = useState(() => localStorage.getItem("collabcode-sample-opened") === "true");
-  const [inviteCompleted, setInviteCompleted] = useState(() => localStorage.getItem("collabcode-invite-completed") === "true");
+  const [projectSearch, setProjectSearch] = useState("");
+  const [creatingTemplate, setCreatingTemplate] = useState<"typescript" | "ecommerce" | null>(null);
   const revokeSessions = async () => {
     if (!window.confirm("Sign out this account from every browser and device?")) return;
     try { await logoutEverywhere(); }
@@ -43,42 +39,43 @@ function Home() {
     }
   }, []);
   useEffect(() => { void loadWorkspaces(); }, [loadWorkspaces]);
-  const ownerWorkspace = workspaces.find((workspace) => workspace.role === "owner");
-  const openSample = () => {
-    localStorage.setItem("collabcode-sample-opened", "true");
-    setSampleOpened(true);
-    navigate(`/room/${DEFAULT_ROOM_ID}`);
+  const createWorkspace = async (template: "typescript" | "ecommerce") => {
+    if (creatingTemplate) return;
+    setCreatingTemplate(template);
+    setWorkspaceError("");
+    try {
+      const response = await apiRequest("/api/workspaces", {
+        method: "POST",
+        body: JSON.stringify({ template, name: template === "ecommerce" ? "E-commerce storefront" : "Untitled workspace" })
+      });
+      const result = await response.json() as { workspace?: { id: string; name: string; role: string }; error?: string };
+      if (!response.ok || !result.workspace) throw new Error(result.error || "Could not create the project. Please try again.");
+      setWorkspaces((current) => [result.workspace!, ...current.filter((workspace) => workspace.id !== result.workspace!.id)]);
+      navigate(`/room/${encodeURIComponent(result.workspace.id)}${template === "ecommerce" ? "?preview=1" : ""}`);
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : "Could not create the project. Please try again.");
+    } finally {
+      setCreatingTemplate(null);
+    }
   };
-  const openInvite = () => navigate(ownerWorkspace ? `/room/${ownerWorkspace.id}?invite=1` : `/room/${makeRoomId()}?invite=1`);
+  const normalizedSearch = projectSearch.trim().toLowerCase();
+  const visibleWorkspaces = workspaces.filter((workspace) => !normalizedSearch || `${workspace.name} ${workspace.id} ${workspace.role}`.toLowerCase().includes(normalizedSearch));
   return <main className="landing">
-    <nav className="landing-nav"><div className="brand"><span className="brand-mark"><Code2 size={17} /></span>collab<span>code</span></div><div className="landing-account"><span>{user?.email}</span><button className="quiet-link signout-button" onClick={() => void revokeSessions()}>Sign out everywhere</button><button className="quiet-link signout-button" onClick={() => void logout()}>Sign out</button></div></nav>
-    <section className="hero">
-      <div className="eyebrow"><span className="eyebrow-dot" /> A SHARED CODING ROOM FOR YOUR TEAM</div>
-      <h1>Build together.<br /><em>See every change.</em></h1>
-      <p className="hero-copy">A shared coding room for your team. Edit the same files in real time, then run a sandboxed preview of your HTML, CSS, and JavaScript website.</p>
-      <button className="primary large" onClick={() => navigate(`/room/${makeRoomId()}`)}>Create a workspace <ArrowRight size={16} /></button>
-      <button className="text-button" onClick={openSample}>Open the sample workspace</button>
+    <nav className="landing-nav"><div className="landing-brand-area"><div className="brand"><span className="brand-mark"><Code2 size={17} /></span>collab<span>code</span></div><span className="landing-nav-divider" /><span className="landing-tab-active"><Folder size={14} /> Projects</span></div><div className="landing-account"><span>{user?.email}</span><button className="quiet-link signout-button" onClick={() => void revokeSessions()}>Sign out everywhere</button><button className="quiet-link signout-button" onClick={() => void logout()}>Sign out</button></div></nav>
+    <section className="projects-intro">
+      <div><div className="eyebrow"><span className="eyebrow-dot" /> YOUR COLLABCODE PROJECTS</div><h1>Your projects.<br /><em>Made together.</em></h1><p className="hero-copy">Open a workspace you own or were invited to, or start a new project from a ready-to-edit template.</p></div>
+      <button className="primary project-create-button" onClick={() => void createWorkspace("typescript")} disabled={Boolean(creatingTemplate)}><Plus size={15} />{creatingTemplate === "typescript" ? "Creating…" : "New code workspace"}</button>
     </section>
-    <section className="feature-strip">
-      <div><div className="feature-icon violet"><MousePointer2 size={17} /></div><b>Shared editing</b><span>Monaco + Yjs</span></div>
-      <div><div className="feature-icon blue"><Users size={17} /></div><b>Live presence</b><span>See your team in the room</span></div>
-      <div><div className="feature-icon green"><Network size={17} /></div><b>Room links</b><span>Share after inviting</span></div>
-      <div><div className="feature-icon amber"><LockKeyhole size={17} /></div><b>Member access</b><span>Sign in and get invited</span></div>
+    <section className="project-template-card" aria-labelledby="store-template-title">
+      <div className="template-copy"><div className="template-tag"><ShoppingBag size={12} /> STARTER PROJECT <span>·</span> HTML, CSS &amp; JAVASCRIPT</div><h2 id="store-template-title">A storefront, ready<br />for your ideas.</h2><p>Explore a polished little shop with product details, a working demo bag, and a live preview. Make it your own, then invite a teammate to build with you.</p><button className="primary template-button" onClick={() => void createWorkspace("ecommerce")} disabled={Boolean(creatingTemplate)}>{creatingTemplate === "ecommerce" ? "Creating storefront…" : "Create e-commerce project"}<ArrowRight size={14} /></button><small>Creates a private copy in your projects. Checkout is a front-end demo.</small></div>
+      <div className="template-art" aria-hidden="true"><div className="template-art-top"><span>FORM &amp; FIELD</span><span>THE EVERYDAY EDIT</span></div><div className="template-art-title">Useful things.<br /><em>Beautifully made.</em></div><div className="template-products"><div className="template-product template-product-one"><span>01</span><i /></div><div className="template-product template-product-two"><span>02</span><i /></div><div className="template-product template-product-three"><span>03</span><i /></div></div><div className="template-art-bottom">MADE FOR DAILY LIFE <span>·</span> LESS, BUT BETTER</div></div>
     </section>
-    <section className="getting-started" aria-labelledby="getting-started-title">
-      <div className="getting-started-heading"><div><span className="eyebrow-dot" /><b id="getting-started-title">Getting started</b><small>A quick path from first visit to shared coding.</small></div><span>{Number(Boolean(ownerWorkspace)) + Number(sampleOpened) + Number(inviteCompleted)} of 3 complete</span></div>
-      <div className="getting-started-steps">
-        <button className={ownerWorkspace ? "guide-step complete" : "guide-step"} onClick={() => navigate(`/room/${makeRoomId()}`)}><span className="guide-check">{ownerWorkspace ? <Check size={13} /> : "1"}</span><span><b>Create a workspace</b><small>Start a private shared room.</small></span><ArrowRight size={14} /></button>
-        <button className={sampleOpened ? "guide-step complete" : "guide-step"} onClick={openSample}><span className="guide-check">{sampleOpened ? <Check size={13} /> : "2"}</span><span><b>Try the sample workspace</b><small>Explore a ready-made room first.</small></span><ArrowRight size={14} /></button>
-        <button className={inviteCompleted ? "guide-step complete" : "guide-step"} onClick={openInvite}><span className="guide-check">{inviteCompleted ? <Check size={13} /> : "3"}</span><span><b>Invite a teammate</b><small>They need a CollabCode account first.</small></span><ArrowRight size={14} /></button>
-      </div>
-    </section>
-    <section className="workspace-list">
-      <div className="workspace-list-heading"><div><b>Your workspaces</b><span>Rooms you own or have been invited to</span></div><span>{workspaces.length}</span></div>
+    <section className="projects-section" aria-labelledby="projects-heading">
+      <div className="projects-section-heading"><div><b id="projects-heading">All projects</b><span>Workspaces you own and projects shared with you</span></div><label className="project-search"><Search size={14} /><input type="search" value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder="Search projects" aria-label="Search projects" />{projectSearch && <button onClick={() => setProjectSearch("")} aria-label="Clear project search"><X size={13} /></button>}</label></div>
       {workspaceError && <div className="workspace-list-error" role="alert"><span>{workspaceError}</span><button onClick={() => void loadWorkspaces()}>Try again</button></div>}
-      {loadingWorkspaces ? <p className="workspace-empty" role="status">Loading your workspaces…</p> : workspaces.length ? workspaces.map((workspace) => <button className="workspace-card" key={workspace.id} onClick={() => navigate(`/room/${workspace.id}`)}><span className="workspace-card-icon"><Folder size={15} /></span><span className="workspace-card-info"><b>{workspace.name}</b><small>{workspace.id}</small></span><span className="workspace-role">{workspace.role}</span><ArrowRight size={14} /></button>) : !workspaceError && <div className="workspace-empty"><Folder size={19} /><b>Your workspaces will appear here</b><span>Create a room to begin, or open the sample to explore.</span><button className="primary" onClick={() => navigate(`/room/${makeRoomId()}`)}>Create your first workspace <ArrowRight size={13} /></button></div>}
+      {loadingWorkspaces ? <p className="projects-empty" role="status">Loading your projects…</p> : visibleWorkspaces.length ? <div className="project-cards">{visibleWorkspaces.map((workspace) => <button className="project-card" key={workspace.id} onClick={() => navigate(`/room/${encodeURIComponent(workspace.id)}`)}><span className="project-card-icon"><Folder size={17} /></span><span className="project-card-info"><b>{workspace.name}</b><small>{workspace.id}</small></span><span className={`project-role ${workspace.role === "owner" ? "project-role-owner" : ""}`}>{workspace.role}</span><ArrowRight size={15} /></button>)}</div> : !workspaceError && <div className="projects-empty">{normalizedSearch ? <><Search size={19} /><b>No matching projects</b><span>Try a different project name or room ID.</span></> : <><Folder size={19} /><b>No projects yet</b><span>Create a blank workspace or start with the storefront template above.</span><button className="primary" onClick={() => void createWorkspace("typescript")} disabled={Boolean(creatingTemplate)}>Create your first project <ArrowRight size={13} /></button></>}</div>}
     </section>
-    <footer className="landing-footer">Built for focused collaboration <span>·</span> More workspace features are coming in later phases</footer>
+    <footer className="landing-footer">Real-time shared editing <span>·</span> Private workspaces <span>·</span> Invite your team</footer>
   </main>;
 }
 
@@ -90,6 +87,7 @@ function Room() {
   const [accessMembers, setAccessMembers] = useState<Array<{ id: string; name: string; email: string; role: string }>>([]);
   const [canManageAccess, setCanManageAccess] = useState(false);
   const [currentRole, setCurrentRole] = useState<"owner" | "editor" | "viewer">("viewer");
+  const [workspaceName, setWorkspaceName] = useState("Untitled workspace");
   const [accessError, setAccessError] = useState("");
   const [activeFile, setActiveFile] = useState("src/index.ts");
   const [editorSelection, setEditorSelection] = useState("");
@@ -116,17 +114,19 @@ function Room() {
   const [previewErrors, setPreviewErrors] = useState<string[]>([]);
   const [previewRunId, setPreviewRunId] = useState(0);
   const previewFrameRef = useRef<HTMLIFrameElement>(null);
+  const samplePreviewStarted = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const quickSearchInputRef = useRef<HTMLInputElement>(null);
   const previewNeedsStarter = previewWarnings.some((warning) => warning.startsWith("Add index.html"));
   const refreshAccess = useCallback(async () => {
     try {
       const response = await apiRequest(`/api/workspaces/${encodeURIComponent(roomId)}/members`);
-      const result = await response.json() as { members?: Array<{ id: string; name: string; email: string; role: string }>; canManage?: boolean; currentRole?: "owner" | "editor" | "viewer"; error?: string };
+      const result = await response.json() as { members?: Array<{ id: string; name: string; email: string; role: string }>; canManage?: boolean; currentRole?: "owner" | "editor" | "viewer"; workspaceName?: string; error?: string };
       if (!response.ok) throw new Error(result.error || "Could not load workspace access.");
       setAccessMembers(result.members || []);
       setCanManageAccess(Boolean(result.canManage));
       setCurrentRole(result.currentRole || "viewer");
+      if (result.workspaceName) setWorkspaceName(result.workspaceName);
       setAccessError("");
     } catch (error) {
       setAccessError(error instanceof Error ? error.message : "Could not load workspace access.");
@@ -136,7 +136,9 @@ function Room() {
   // initial document sync before asking the access endpoint for its members.
   useEffect(() => { if (workspace.synced) void refreshAccess(); }, [workspace.synced, refreshAccess]);
   useEffect(() => {
-    if (workspace.filePaths.length && !workspace.filePaths.includes(activeFile)) setActiveFile(workspace.filePaths[0]);
+    if (workspace.filePaths.length && !workspace.filePaths.includes(activeFile)) {
+      setActiveFile(workspace.filePaths.includes("index.html") ? "index.html" : workspace.filePaths[0]);
+    }
   }, [workspace.filePaths, activeFile]);
   useEffect(() => { setEditorSelection(""); setReviewSelection(null); }, [activeFile]);
   useEffect(() => {
@@ -290,6 +292,13 @@ function Room() {
     setPreviewOpen(true);
   };
 
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("preview") !== "1" || !workspace.synced || !workspace.filePaths.includes("index.html") || samplePreviewStarted.current) return;
+    samplePreviewStarted.current = true;
+    setActiveFile("index.html");
+    runWebsitePreview();
+  }, [workspace.synced, workspace.filePaths]);
+
   const createWebsiteStarter = () => {
     if (currentRole === "viewer") return;
     for (const [path, contents] of Object.entries(WEBSITE_STARTER_FILES)) workspace.createFile(path, contents);
@@ -315,7 +324,7 @@ function Room() {
   return <div className="ide-shell">
     <header className="topbar">
       <a className="brand compact" href="/"><span className="brand-mark"><Code2 size={16} /></span>collab<span>code</span></a>
-      <div className="crumb"><span className="crumb-divider">/</span><span className="crumb-project">Untitled workspace</span><span className="room-chip">{roomId}</span></div>
+      <div className="crumb"><span className="crumb-divider">/</span><span className="crumb-project">{workspaceName}</span><span className="room-chip">{roomId}</span></div>
       <div className="top-actions">
         <div className={`connection ${!workspace.connected ? "is-offline" : workspace.synced ? "is-connected" : "is-syncing"}`} aria-label={!workspace.connected ? "Connection lost; reconnecting" : workspace.synced ? "Connected and all changes synced" : "Connected; loading shared workspace"} aria-live="polite" title={!workspace.connected ? "Trying to reconnect. Your local changes will sync when the connection returns." : workspace.synced ? "All changes are synced with the room." : "Connected; loading the shared workspace."}>
           {workspace.connected ? <Wifi size={14} /> : <WifiOff size={14} />}<span>{!workspace.connected ? workspace.error ? "Connection issue · retrying" : "Connecting…" : workspace.synced ? "Live · synced" : "Loading workspace…"}</span>
